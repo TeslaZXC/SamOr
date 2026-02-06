@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+websockets
+pydantic
+pydantic-settings
+sqlalchemy
+aiosqlite
+pycryptodomex
+python-multipart
+python-dotenv
+jinja2
+email-validator
