@@ -33,7 +33,7 @@ os.makedirs("static/uploads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
-app.include_router(ws_router, tags=["ws"])
+app.include_router(ws_router, prefix="/api", tags=["ws"])
 from app.upload import router as upload_router
 app.include_router(upload_router, prefix="/api", tags=["upload"])
 from app.routers.files import router as files_router

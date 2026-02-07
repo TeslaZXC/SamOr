@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import io from 'socket.io-client';
+
 import { DiffieHellman } from '../crypto/dh';
 import { MTProtoCrypto } from '../crypto/mtproto';
 
@@ -17,7 +17,14 @@ export const SocketProvider = ({ children }) => {
 
     useEffect(() => {
         // Connect to WebSocket
-        const ws = new WebSocket('ws://localhost:8000/ws/connect');
+        // Connect to WebSocket
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        // Use VITE_WS_URL if set, otherwise default to /ws/connect on same host
+        const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${host}/ws/connect`;
+
+        console.log('Connecting to WebSocket at:', wsUrl);
+        const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
             console.log('WS Connected');
