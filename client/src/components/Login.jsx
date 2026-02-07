@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_URL } from '../config';
 import { useSocket } from '../context/SocketContext';
 import { Mail, Lock, User, Key, ArrowRight, Loader2, CheckCircle2, Camera } from 'lucide-react';
 
@@ -100,7 +101,7 @@ const Login = ({ onLoginSuccess }) => {
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const res = await fetch('http://localhost:8000/api/upload', { method: 'POST', body: formData });
+            const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
             const data = await res.json();
             if (data.url) setRegAvatarUrl(data.url);
         } catch (e) { console.error(e); }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { API_URL } from '../config';
 import { useSocket } from '../context/SocketContext';
 import { User, Lock, Camera, Save, X, Check, Loader2, Shield, Key, Mail } from 'lucide-react';
 
@@ -66,7 +67,7 @@ const Settings = ({ user, onClose }) => {
         formData.append('file', file);
 
         try {
-            const res = await fetch('http://localhost:8000/api/upload', {
+            const res = await fetch(`${API_URL}/upload`, {
                 method: 'POST',
                 body: formData
             });

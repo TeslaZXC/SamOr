@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_URL } from '../config';
 import { useSocket } from '../context/SocketContext';
 import { User, Camera, ArrowRight, Loader2 } from 'lucide-react';
 
@@ -31,7 +32,7 @@ const ProfileSetup = ({ tempToken, onSetupComplete }) => {
         formData.append('file', file);
 
         try {
-            const res = await fetch('http://localhost:8000/api/upload', {
+            const res = await fetch(`${API_URL}/upload`, {
                 method: 'POST',
                 body: formData
             });

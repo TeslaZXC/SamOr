@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_URL } from './config';
 import { SocketProvider, useSocket } from './context/SocketContext';
 import { Lock, Send, Loader2, Video, Phone, UserPlus, Search, Menu, Settings as SettingsIcon, ArrowRight, Check, CheckCheck, Paperclip, Mic, Play, Pause, X, File as FileIcon, Download, Plus, Minus, RotateCcw, Maximize, Volume2, VolumeX } from 'lucide-react';
 import Login from './components/Login';
@@ -793,7 +794,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onStartCall }) => {
       formData.append('file', file);
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', 'http://localhost:8000/api/upload');
+      xhr.open('POST', `${API_URL}/upload`);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
