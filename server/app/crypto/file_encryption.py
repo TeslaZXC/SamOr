@@ -11,14 +11,30 @@ class FileEncryptor:
         self.key = self._load_or_generate_key()
 
     def _load_or_generate_key(self):
-        if os.path.exists(KEY_FILE):
-            with open(KEY_FILE, "rb") as f:
-                return f.read()
-        else:
-            key = get_random_bytes(32)  # AES-256
-            with open(KEY_FILE, "wb") as f:
-                f.write(key)
-            return key
+        key_path = Path(__file__).parent / KEY_FILE
+        if key_path.exists():
+            with open(key_path, "rb") as f:
+                key = f.read()
+                
+            if len(key) in [16, 24, 32]:
+                return key
+            
+            # Common error: trailing newline from manual editing/transfer
+            if len(key) == 33 and key[-1] == 10: # \n
+                print(f"Warning: Key in {KEY_FILE} had trailing newline. Truncating to 32 bytes.")
+                corrected_key = key[:-1]
+                # Save back corrected
+                with open(key_path, "wb") as f:
+                    f.write(corrected_key)
+                return corrected_key
+                
+            print(f"Warning: Invalid key length {len(key)} in {KEY_FILE}. Regenerating.")
+            # Fallthrough to generate
+
+        key = get_random_bytes(32)  # AES-256
+        with open(key_path, "wb") as f:
+            f.write(key)
+        return key
 
     def encrypt_file(self, input_file, output_path):
         """
