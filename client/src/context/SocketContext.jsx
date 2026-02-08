@@ -11,6 +11,8 @@ export const useSocket = () => useContext(SocketContext);
 export const SocketProvider = ({ children }) => {
     const [status, setStatus] = useState('disconnected'); // disconnected, handshaking, connected
     const [messages, setMessages] = useState([]);
+    const [dialogs, setDialogs] = useState([]);
+    const [contacts, setContacts] = useState([]);
     const socketRef = useRef(null);
     const dhRef = useRef(new DiffieHellman());
     const authKeyRef = useRef(null);
@@ -68,6 +70,29 @@ export const SocketProvider = ({ children }) => {
 
                     console.log('Decrypted Message:', message);
 
+                    // Handle dialogs.list and user.list_result in context
+                    if (message.type === 'dialogs.list') {
+                        // Filter out dialogs with invalid peer data
+                        const validDialogs = (message.dialogs || []).filter(d => {
+                            if (!d.peer || !d.peer.display_name) {
+                                console.warn('DEBUG: Filtering out invalid dialog', d);
+                                return false;
+                            }
+                            return true;
+                        });
+                        setDialogs(validDialogs);
+                    } else if (message.type === 'user.list_result') {
+                        // Filter out users without display_name
+                        const validUsers = (message.users || []).filter(u => {
+                            if (!u.display_name) {
+                                console.warn('DEBUG: Filtering out invalid user', u);
+                                return false;
+                            }
+                            return true;
+                        });
+                        setContacts(validUsers);
+                    }
+
                     if (message.type === 'auth_success') {
                         // We let the component handle the state update via messages or callback
                         // We push it to messages so App/Login can see it
@@ -93,8 +118,9 @@ export const SocketProvider = ({ children }) => {
     }, []);
 
     const sendMessage = (payload) => {
+        console.log("DEBUG: sendMessage called with:", payload);
         if (status !== 'connected' || !authKeyRef.current) {
-            console.warn('Cannot send: Not connected securely');
+            console.warn('Cannot send: Not connected securely. Status:', status);
             return;
         }
 
@@ -118,7 +144,7 @@ export const SocketProvider = ({ children }) => {
     };
 
     return (
-        <SocketContext.Provider value={{ status, messages, sendMessage }}>
+        <SocketContext.Provider value={{ status, messages, sendMessage, dialogs, contacts, setDialogs, setContacts }}>
             {children}
         </SocketContext.Provider>
     );

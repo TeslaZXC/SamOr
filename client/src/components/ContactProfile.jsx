@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { User, Phone, X, Loader2, MessageSquare, AtSign, Info } from 'lucide-react';
 import { useSocket } from '../context/SocketContext';
 
-const ContactProfile = ({ userId, onClose, onOpenMedia }) => {
+const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
     const { sendMessage, messages } = useSocket();
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -115,7 +115,10 @@ const ContactProfile = ({ userId, onClose, onOpenMedia }) => {
                                 <button onClick={onClose} className="flex-1 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl transition-colors font-medium">
                                     Close
                                 </button>
-                                <button onClick={onClose} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2">
+                                <button
+                                    onClick={() => profile && onSendMessage && onSendMessage(profile)}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
+                                >
                                     <MessageSquare size={18} /> Send Message
                                 </button>
                             </div>

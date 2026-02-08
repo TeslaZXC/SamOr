@@ -36,17 +36,47 @@ class Message(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     sender_id = Column(Integer, index=True)
-    recipient_id = Column(Integer, index=True)
-    content = Column(String) # Encrypted content (or plain text depending on arch, we store plain text for MVP but in real app encrypted blob)
-    # For this MVP, we store the *content* as provided by client. 
-    # The client sends "text" or "base64 photo". We store that JSON string or just the text.
-    # Actually, let's store type and content.
-    msg_type = Column(String, default="text") # text, photo, voice, video_circle
-    media_url = Column(String, nullable=True) # if photo/voice
+    recipient_id = Column(Integer, index=True, nullable=True) # Start nullable for channel msgs
+    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=True, index=True) # New for groups
+    
+    content = Column(String) 
+    msg_type = Column(String, default="text") 
+    media_url = Column(String, nullable=True)
     is_read = Column(Boolean, default=False)
     
-    # We will just store the main textual content in 'content' for simplicity or JSON
-    created_at = Column(Float) # Timestamp
+    reply_to_msg_id = Column(Integer, nullable=True)
+    fwd_from_id = Column(Integer, nullable=True)
+    deleted_by_sender = Column(Boolean, default=False)
+    deleted_by_recipient = Column(Boolean, default=False)
+    
+    created_at = Column(Float)
+
+class Group(Base):
+    __tablename__ = "groups"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    avatar_url = Column(String, nullable=True)
+    owner_id = Column(Integer, index=True)
+    created_at = Column(Float)
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    role = Column(String, default="member") # owner, admin, member
+    joined_at = Column(Float)
+
+class Channel(Base):
+    __tablename__ = "channels"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), index=True)
+    name = Column(String)
+    type = Column(String, default="text") # text, voice
+    position = Column(Integer, default=0)
 
 class VerificationCode(Base):
     __tablename__ = "verification_codes"
@@ -59,11 +89,11 @@ class Dialog(Base):
     __tablename__ = "dialogs"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True) # Owner of this dialog entry
-    peer_id = Column(Integer, index=True) # The other person
+    user_id = Column(Integer, index=True) 
+    peer_id = Column(Integer, index=True) 
     last_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
     unread_count = Column(Integer, default=0)
-    updated_at = Column(Float) # Sort by this
+    updated_at = Column(Float)
 
 async def init_db():
     async with engine.begin() as conn:

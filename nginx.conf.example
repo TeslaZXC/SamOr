@@ -11,11 +11,32 @@ http {
     # Increase max upload size if needed
     client_max_body_size 100M;
 
+    # HTTP Server (Redirect to HTTPS)
     server {
         listen 80;
-        server_name _;
+        server_name statka-rb.ru www.statka-rb.ru;
+        return 301 https://$host$request_uri;
+    }
 
-        root "C:/Users/Admin/Desktop/nginx/html";
+    # HTTPS Server (Secure)
+    server {
+        listen 443 ssl http2;
+        server_name statka-rb.ru www.statka-rb.ru;
+
+        # SSL Configuration
+        # 1. Combine "Certificate" + "Root Certificate" into one file named 'fullchain.pem'
+        # 2. Rename "Private Key" to 'private.key'
+        # 3. Upload them to the folder below:
+        ssl_certificate "C:/Users/Admin/Desktop/nginx/ssl/fullchain.pem";
+        ssl_certificate_key "C:/Users/Admin/Desktop/nginx/ssl/private.key";
+
+        ssl_session_cache shared:SSL:1m;
+        ssl_session_timeout 10m;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        # Path to your built React app (e.g. /var/www/samor/dist)
+        root "C:/Users/Admin/Desktop/nginx/html"; 
         index index.html;
 
         # Frontend
@@ -39,12 +60,5 @@ http {
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
         }
-        
-        # Files/Uploads (If they are served separately or via API)
-        # Assuming they are served via /api/files or similar, the above block covers it.
-        # If static files are served directly by Nginx from backend folder:
-        # location /static/ {
-        #     alias C:/Path/To/Backend/static/;
-        # }
     }
 }
