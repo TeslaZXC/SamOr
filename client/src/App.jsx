@@ -563,14 +563,17 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings }) => {
 
         // Also update activeChat if it matches (for immediate header update)
         if (activeChat?.peer?.id === user_id) {
-          setActiveChat(prev => ({
-            ...prev,
-            peer: {
-              ...prev.peer,
-              is_online: status === 'online',
-              last_seen: last_seen
-            }
-          }));
+          const newIsOnline = status === 'online';
+          if (activeChat.peer.is_online !== newIsOnline || activeChat.peer.last_seen !== last_seen) {
+            setActiveChat(prev => ({
+              ...prev,
+              peer: {
+                ...prev.peer,
+                is_online: newIsOnline,
+                last_seen: last_seen
+              }
+            }));
+          }
         }
       }
     }
@@ -753,7 +756,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onStartCall }) => {
       sendMessage({ method: 'messages.get_history', args: { peer_id: activeChat.peer.id } });
       setHistory([]); // Reset while loading
     }
-  }, [activeChat]);
+  }, [activeChat?.id]);
 
   // ... (useEffects for messages logic remain same, omitted for brevity if unchanged, but for replacement I must include context)
 
@@ -854,6 +857,10 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onStartCall }) => {
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
     } else {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Microphone access requires HTTPS or localhost. Please enable SSL/TLS on your server.");
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const recorder = new MediaRecorder(stream);
@@ -1294,6 +1301,12 @@ const AppContent = () => {
     stopTracks(); // Ensure previous tracks are released
 
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Camera/Microphone access requires HTTPS or localhost. Please enable SSL/TLS on your server.");
+        setCallStatus('idle');
+        setActiveCallPeer(null);
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: video

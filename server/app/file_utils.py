@@ -28,6 +28,6 @@ def upload_file_locally(file_obj, filename, content_type=None):
 
     # Construct the URL
     # Point to the new dynamic endpoint that decrypts on the fly
-    url = f"http://localhost:8000/api/files/{unique_name}"
+    url = f"/api/files/{unique_name}"
         
     return url
