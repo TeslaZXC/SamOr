@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_URL, getImageUrl } from '../config';
 import { X, Upload, Check } from 'lucide-react';
 
 const CreateGroupModal = ({ onClose, onCreate }) => {
@@ -19,7 +20,7 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
             // Using relative path or API_URL if available.
             // In App.jsx, API_URL is used. Let's assume it's available or hardcode for now.
             // Since it's a demo, we can use the same server.
-            const response = await fetch('/api/upload', {
+            const response = await fetch(`${API_URL}/upload`, {
                 method: 'POST',
                 body: formData
             });
@@ -28,11 +29,11 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
                 const data = await response.json();
                 setAvatarUrl(data.url);
             } else {
-                alert("Upload failed");
+                alert("Ошибка загрузки");
             }
         } catch (err) {
             console.error(err);
-            alert("Upload error");
+            alert("Ошибка загрузки");
         } finally {
             setUploading(false);
         }
@@ -43,8 +44,8 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
         if (!name.trim()) return;
 
         setLoading(true);
-        await onCreate({ name, avatarUrl });
-        setLoading(false);
+        await onCreate({ name, avatar_url: avatarUrl });
+        // Do not set loading false, we are closing.
         onClose();
     };
 
@@ -52,7 +53,7 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="w-full max-w-md bg-[#1c1c1e] rounded-2xl shadow-2xl border border-white/10 overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-white/10 flex justify-between items-center">
-                    <h2 className="text-xl font-semibold text-white">Create a Server</h2>
+                    <h2 className="text-xl font-semibold text-white">Создать сообщество</h2>
                     <button onClick={onClose} className="text-white/40 hover:text-white transition-colors">
                         <X size={24} />
                     </button>
@@ -67,11 +68,11 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
                             {uploading ? (
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
                             ) : avatarUrl ? (
-                                <img src={avatarUrl} className="w-full h-full object-cover" />
+                                <img src={getImageUrl(avatarUrl)} className="w-full h-full object-cover" />
                             ) : (
                                 <>
                                     <Upload size={32} className="mb-2" />
-                                    <span className="text-xs font-medium uppercase tracking-wider">Upload</span>
+                                    <span className="text-xs font-medium uppercase tracking-wider">Загрузить</span>
                                 </>
                             )}
                             <input
@@ -82,15 +83,15 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
                                 onChange={handleFileSelect}
                             />
                         </div>
-                        <p className="text-xs text-white/40">Upload an image for your server</p>
+                        <p className="text-xs text-white/40">Загрузите изображение для сообщества</p>
                     </div>
 
                     <div className="space-y-2">
-                        <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Server Name</label>
+                        <label className="text-xs font-bold text-white/60 uppercase tracking-wider">Название</label>
                         <input
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="My Awesome Server"
+                            placeholder="Мое супер сообщество"
                             className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             autoFocus
                         />
@@ -99,10 +100,10 @@ const CreateGroupModal = ({ onClose, onCreate }) => {
                     <div className="pt-2">
                         <button
                             type="submit"
-                            disabled={!name.trim() || loading}
+                            disabled={!name.trim() || loading || uploading}
                             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                            {loading ? 'Creating...' : 'Create Server'}
+                            {loading ? 'Создание...' : 'Создать'}
                         </button>
                     </div>
                 </form>

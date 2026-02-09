@@ -64,65 +64,14 @@ const CallModal = ({
         setIsMinimized(!isMinimized);
     };
 
-    // Drag Logic
-    const [position, setPosition] = useState(null);
-    const [isDragging, setIsDragging] = useState(false);
-    const dragOffset = useRef({ x: 0, y: 0 });
 
-    useEffect(() => {
-        const handleMouseMove = (e) => {
-            if (isDragging) {
-                const windowWidth = window.innerWidth;
-                const windowHeight = window.innerHeight;
-                const elementWidth = 288; // w-72 = 18rem * 16px
-                const elementHeight = 192; // h-48 = 12rem * 16px
-
-                let newX = e.clientX - dragOffset.current.x;
-                let newY = e.clientY - dragOffset.current.y;
-
-                // Clamp to screen edges
-                newX = Math.max(0, Math.min(newX, windowWidth - elementWidth));
-                newY = Math.max(0, Math.min(newY, windowHeight - elementHeight));
-
-                setPosition({ x: newX, y: newY });
-            }
-        };
-
-        const handleMouseUp = () => {
-            setIsDragging(false);
-        };
-
-        if (isDragging) {
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-        }
-
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [isDragging]);
-
-    const handleMouseDown = (e) => {
-        e.stopPropagation();
-        if (!isMinimized) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        dragOffset.current = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
-        setPosition({ x: rect.left, y: rect.top });
-        setIsDragging(true);
-    };
 
     if (!callStatus || callStatus === 'idle') return null;
 
     if (isMinimized) {
         return (
             <div
-                className={`fixed z-[60] w-72 h-48 bg-[#1c1c1e] rounded-xl overflow-hidden shadow-2xl border border-white/20 group cursor-grab active:cursor-grabbing ${!position ? 'bottom-4 right-4 animate-in slide-in-from-bottom-4 duration-300' : ''}`}
-                style={position ? { left: position.x, top: position.y } : {}}
-                onMouseDown={handleMouseDown}
+                className="fixed z-[60] w-72 h-48 bg-[#1c1c1e] rounded-xl overflow-hidden shadow-2xl border border-white/20 group bottom-4 right-4 animate-in slide-in-from-bottom-4 duration-300"
             >
                 {/* Minimized Content */}
                 <div className="relative w-full h-full">

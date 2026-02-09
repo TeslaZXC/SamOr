@@ -45,7 +45,7 @@ const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
                             <>
                                 <img src={profile.avatar_url} className="w-full h-full object-cover" />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <span className="text-white text-xs font-medium">View</span>
+                                    <span className="text-white text-xs font-medium">Просмотр</span>
                                 </div>
                             </>
                         ) : (
@@ -63,11 +63,11 @@ const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
                             <h2 className="text-2xl font-bold text-white mt-4">{profile.display_name}</h2>
                             {profile.is_online ? (
                                 <p className="text-blue-400 text-sm mb-6 flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-blue-500" /> Online
+                                    <span className="w-2 h-2 rounded-full bg-blue-500" /> В сети
                                 </p>
                             ) : (
                                 <p className="text-white/40 text-sm mb-6">
-                                    {profile.last_seen ? `Last seen ${new Date(profile.last_seen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Offline'}
+                                    {profile.last_seen ? `Был(а) в сети ${new Date(profile.last_seen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Не в сети'}
                                 </p>
                             )}
 
@@ -78,7 +78,7 @@ const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
                                         <AtSign size={20} />
                                     </div>
                                     <div>
-                                        <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Username</p>
+                                        <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Имя пользователя</p>
                                         <p className="text-white font-mono">@{profile.username}</p>
                                     </div>
                                 </div>
@@ -90,7 +90,7 @@ const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
                                             <Phone size={20} />
                                         </div>
                                         <div>
-                                            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Phone</p>
+                                            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">Телефон</p>
                                             <p className="text-white font-mono">{profile.phone_number}</p>
                                         </div>
                                     </div>
@@ -103,7 +103,7 @@ const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
                                             <Info size={20} />
                                         </div>
                                         <div>
-                                            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">About</p>
+                                            <p className="text-white/40 text-xs uppercase tracking-wider font-bold">О себе</p>
                                             <p className="text-white text-sm">{profile.about}</p>
                                         </div>
                                     </div>
@@ -113,13 +113,13 @@ const ContactProfile = ({ userId, onClose, onOpenMedia, onSendMessage }) => {
                             {/* Actions */}
                             <div className="w-full mt-8 flex gap-3">
                                 <button onClick={onClose} className="flex-1 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl transition-colors font-medium">
-                                    Close
+                                    Закрыть
                                 </button>
                                 <button
                                     onClick={() => profile && onSendMessage && onSendMessage(profile)}
                                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
                                 >
-                                    <MessageSquare size={18} /> Send Message
+                                    <MessageSquare size={18} /> Написать
                                 </button>
                             </div>
                         </>

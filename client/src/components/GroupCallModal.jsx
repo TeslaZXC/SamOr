@@ -42,57 +42,6 @@ const GroupCallModal = ({
     toggleCam
 }) => {
     const [isMinimized, setIsMinimized] = useState(false);
-    const [position, setPosition] = useState(null);
-    const [isDragging, setIsDragging] = useState(false);
-    const dragOffset = useRef({ x: 0, y: 0 });
-
-    // Drag Logic
-    useEffect(() => {
-        const handleMouseMove = (e) => {
-            if (isDragging) {
-                const windowWidth = window.innerWidth;
-                const windowHeight = window.innerHeight;
-                const elementWidth = 288; // w-72 = 18rem * 16px
-                const elementHeight = 192; // h-48 = 12rem * 16px
-
-                let newX = e.clientX - dragOffset.current.x;
-                let newY = e.clientY - dragOffset.current.y;
-
-                // Clamp to screen edges
-                newX = Math.max(0, Math.min(newX, windowWidth - elementWidth));
-                newY = Math.max(0, Math.min(newY, windowHeight - elementHeight));
-
-                setPosition({ x: newX, y: newY });
-            }
-        };
-
-        const handleMouseUp = () => {
-            setIsDragging(false);
-        };
-
-        if (isDragging) {
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-        }
-
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [isDragging]);
-
-    const handleMouseDown = (e) => {
-        e.stopPropagation();
-        if (!isMinimized) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        dragOffset.current = {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
-        };
-        setPosition({ x: rect.left, y: rect.top });
-        setIsDragging(true);
-    };
-
     const toggleMinimize = (e) => {
         e?.stopPropagation();
         setIsMinimized(!isMinimized);
@@ -102,38 +51,48 @@ const GroupCallModal = ({
 
     // Minimized View
     if (isMinimized) {
+        const firstRemoteStream = Object.values(remoteStreams)[0];
+
         return (
             <div
-                className={`fixed z-[60] w-72 h-48 bg-[#1c1c1e] rounded-xl overflow-hidden shadow-2xl border border-white/20 group cursor-grab active:cursor-grabbing ${!position ? 'bottom-4 right-4 animate-in slide-in-from-bottom-4 duration-300' : ''}`}
-                style={position ? { left: position.x, top: position.y } : {}}
-                onMouseDown={handleMouseDown}
+                className="fixed z-[60] w-72 h-48 bg-[#1c1c1e] rounded-xl overflow-hidden shadow-2xl border border-white/20 group bottom-4 right-4 animate-in slide-in-from-bottom-4 duration-300"
             >
                 <div className="relative w-full h-full">
-                    {/* Show first participant or group info */}
-                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-purple-900 text-white p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-xl font-bold shadow-lg mb-2">
-                            {group?.avatar_url ? <img src={group.avatar_url} className="w-full h-full object-cover rounded-full" /> : group?.name?.[0]}
+                    {firstRemoteStream ? (
+                        <video
+                            ref={ref => { if (ref) ref.srcObject = firstRemoteStream; }}
+                            autoPlay
+                            playsInline
+                            className="w-full h-full object-cover"
+                        />
+                    ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-black text-white p-4 text-center">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-xl font-bold shadow-lg mb-2">
+                                {group?.avatar_url ? <img src={group.avatar_url} className="w-full h-full object-cover rounded-full" /> : group?.name?.[0]}
+                            </div>
+                            <p className="font-bold text-sm truncate w-full">{group?.name}</p>
+                            <div className="flex items-center gap-1 text-xs text-white/50 mt-1">
+                                <Users size={10} />
+                                <span>{Object.keys(remoteStreams).length + 1} участника(ов)</span>
+                            </div>
                         </div>
-                        <p className="font-bold text-sm truncate w-full">{group?.name}</p>
-                        <div className="flex items-center gap-1 text-xs text-white/50 mt-1">
-                            <Users size={10} />
-                            <span>{Object.keys(remoteStreams).length + 1} in call</span>
-                        </div>
-                    </div>
+                    )}
 
                     {/* Overlay on Hover */}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-sm">
                         <button
                             onClick={toggleMinimize}
-                            className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-                            title="Maximize"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors cursor-pointer"
+                            title="Развернуть"
                         >
                             <Maximize2 size={20} />
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); onLeave(); }}
-                            className="p-3 bg-red-500 hover:bg-red-600 rounded-full text-white transition-colors"
-                            title="Leave Call"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="p-3 bg-red-500 hover:bg-red-600 rounded-full text-white transition-colors cursor-pointer"
+                            title="Покинуть звонок"
                         >
                             <PhoneOff size={20} />
                         </button>
@@ -153,10 +112,10 @@ const GroupCallModal = ({
                         {group?.avatar_url ? <img src={group.avatar_url} className="w-full h-full object-cover rounded-2xl" /> : group?.name?.[0]}
                     </div>
                     <div>
-                        <h2 className="text-xl font-black text-white tracking-tight uppercase">{group?.name} Call</h2>
+                        <h2 className="text-xl font-black text-white tracking-tight uppercase">Звонок в {group?.name}</h2>
                         <div className="flex items-center gap-2 text-white/40 text-xs font-bold uppercase tracking-widest">
                             <Users size={12} className="text-blue-400" />
-                            <span>{Object.keys(remoteStreams).length + 1} Participants</span>
+                            <span>{Object.keys(remoteStreams).length + 1} Участников</span>
                         </div>
                     </div>
                 </div>
@@ -164,7 +123,7 @@ const GroupCallModal = ({
                     <button
                         onClick={toggleMinimize}
                         className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all border border-white/10 active:scale-95"
-                        title="Minimize"
+                        title="Свернуть"
                     >
                         <Minimize2 size={24} />
                     </button>
@@ -186,7 +145,7 @@ const GroupCallModal = ({
                     {/* Local Stream */}
                     <div className="relative rounded-[2rem] overflow-hidden bg-white/5 border border-white/10 group aspect-video">
                         {localStream ? (
-                            <VideoTile stream={localStream} name="You" isMuted={true} isMicOn={isMicOn} isCamOn={isCamOn} />
+                            <VideoTile stream={localStream} name="Вы" isMuted={true} isMicOn={isMicOn} isCamOn={isCamOn} />
                         ) : (
                             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-black">
                                 <p className="text-white/40">No Video</p>

@@ -81,3 +81,13 @@
 .premium-button {
   @apply bg-white text-black font-semibold hover:bg-white/90 active:scale-95 transition-all duration-200 shadow-glow hover:shadow-glow-hover;
 }
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

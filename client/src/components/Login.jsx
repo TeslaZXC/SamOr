@@ -139,27 +139,27 @@ const Login = ({ onLoginSuccess }) => {
                         onClick={() => setMode('login')}
                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'login' ? 'bg-blue-600 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
                     >
-                        Login
+                        Вход
                     </button>
                     <button
                         onClick={() => setMode('register')}
                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'register' ? 'bg-blue-600 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
                     >
-                        Sign Up
+                        Регистрация
                     </button>
                 </div>
 
                 <div className="min-h-[300px] flex flex-col justify-center">
                     {mode === 'login' ? (
                         <div className="space-y-4 animate-in fade-in slide-in-from-left-4">
-                            <h2 className="text-2xl font-bold mb-2 text-white">Welcome Back</h2>
-                            <p className="text-white/40 text-sm mb-6">Enter your credentials to access your account</p>
+                            <h2 className="text-2xl font-bold mb-2 text-white">С возвращением</h2>
+                            <p className="text-white/40 text-sm mb-6">Введите данные для входа в аккаунт</p>
 
                             <div className="relative">
                                 <Mail className="absolute left-3 top-3 text-white/40" size={20} />
                                 <input
                                     type="email"
-                                    placeholder="Email Address"
+                                    placeholder="Email адрес"
                                     className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                     value={loginEmail}
                                     onChange={e => setLoginEmail(e.target.value)}
@@ -170,7 +170,7 @@ const Login = ({ onLoginSuccess }) => {
                                 <Lock className="absolute left-3 top-3 text-white/40" size={20} />
                                 <input
                                     type="password"
-                                    placeholder="Password"
+                                    placeholder="Пароль"
                                     className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                     value={loginPassword}
                                     onChange={e => setLoginPassword(e.target.value)}
@@ -182,7 +182,7 @@ const Login = ({ onLoginSuccess }) => {
                                 disabled={loading}
                                 className="premium-button w-full py-3 rounded-xl flex items-center justify-center gap-2 mt-2"
                             >
-                                {loading ? <Loader2 className="animate-spin" /> : <>Sign In <ArrowRight size={18} /></>}
+                                {loading ? <Loader2 className="animate-spin" /> : <>Войти <ArrowRight size={18} /></>}
                             </button>
                             {error && <div className="text-red-500 bg-red-500/10 p-2 rounded-lg text-sm mt-4 text-center">{error}</div>}
                         </div>
@@ -190,13 +190,13 @@ const Login = ({ onLoginSuccess }) => {
                         <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
                             {regStep === 0 && (
                                 <>
-                                    <h2 className="text-2xl font-bold mb-2 text-white">Create Account</h2>
-                                    <p className="text-white/40 text-sm mb-6">Start by verifying your email</p>
+                                    <h2 className="text-2xl font-bold mb-2 text-white">Создать аккаунт</h2>
+                                    <p className="text-white/40 text-sm mb-6">Начните с подтверждения email</p>
                                     <div className="relative">
                                         <Mail className="absolute left-3 top-3 text-white/40" size={20} />
                                         <input
                                             type="email"
-                                            placeholder="Email Address"
+                                            placeholder="Email адрес"
                                             className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                             value={regEmail}
                                             onChange={e => setRegEmail(e.target.value)}
@@ -207,15 +207,15 @@ const Login = ({ onLoginSuccess }) => {
                                         disabled={loading}
                                         className="premium-button w-full py-3 rounded-xl flex items-center justify-center gap-2"
                                     >
-                                        {loading ? <Loader2 className="animate-spin" /> : <>Send Code <ArrowRight size={18} /></>}
+                                        {loading ? <Loader2 className="animate-spin" /> : <>Отправить код <ArrowRight size={18} /></>}
                                     </button>
                                 </>
                             )}
 
                             {regStep === 1 && (
                                 <>
-                                    <h2 className="text-2xl font-bold mb-2 text-white">Verify Email</h2>
-                                    <p className="text-white/40 text-sm mb-6">Code sent to {regEmail}</p>
+                                    <h2 className="text-2xl font-bold mb-2 text-white">Подтверждение Email</h2>
+                                    <p className="text-white/40 text-sm mb-6">Код отправлен на {regEmail}</p>
                                     <div className="relative">
                                         <Key className="absolute left-3 top-3 text-white/40" size={20} />
                                         <input
@@ -231,21 +231,21 @@ const Login = ({ onLoginSuccess }) => {
                                         disabled={loading}
                                         className="premium-button w-full py-3 rounded-xl flex items-center justify-center gap-2"
                                     >
-                                        {loading ? <Loader2 className="animate-spin" /> : <>Verify <CheckCircle2 size={18} /></>}
+                                        {loading ? <Loader2 className="animate-spin" /> : <>Подтвердить <CheckCircle2 size={18} /></>}
                                     </button>
                                 </>
                             )}
 
                             {regStep === 2 && (
                                 <>
-                                    <h2 className="text-2xl font-bold mb-2 text-white">Set Password</h2>
-                                    <p className="text-white/40 text-sm mb-6">Create a strong password</p>
+                                    <h2 className="text-2xl font-bold mb-2 text-white">Установка пароля</h2>
+                                    <p className="text-white/40 text-sm mb-6">Придумайте надежный пароль</p>
                                     <div className="space-y-3">
                                         <div className="relative">
                                             <Lock className="absolute left-3 top-3 text-white/40" size={20} />
                                             <input
                                                 type="password"
-                                                placeholder="Password"
+                                                placeholder="Пароль"
                                                 className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                                 value={regPassword}
                                                 onChange={e => setRegPassword(e.target.value)}
@@ -256,7 +256,7 @@ const Login = ({ onLoginSuccess }) => {
                                             <Lock className="absolute left-3 top-3 text-white/40" size={20} />
                                             <input
                                                 type="password"
-                                                placeholder="Confirm Password"
+                                                placeholder="Подтвердите пароль"
                                                 className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                                 value={regConfirmPassword}
                                                 onChange={e => setRegConfirmPassword(e.target.value)}
@@ -268,14 +268,14 @@ const Login = ({ onLoginSuccess }) => {
                                         onClick={handleRegSetPassword}
                                         className="premium-button w-full py-3 rounded-xl flex items-center justify-center gap-2 mt-2"
                                     >
-                                        Next <ArrowRight size={18} />
+                                        Далее <ArrowRight size={18} />
                                     </button>
                                 </>
                             )}
 
                             {regStep === 3 && (
                                 <>
-                                    <h2 className="text-2xl font-bold mb-2 text-white">Profile Setup</h2>
+                                    <h2 className="text-2xl font-bold mb-2 text-white">Настройка профиля</h2>
 
                                     <div className="flex justify-center mb-4">
                                         <label className="w-20 h-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-colors relative group overflow-hidden">
@@ -294,7 +294,7 @@ const Login = ({ onLoginSuccess }) => {
                                         <div className="relative">
                                             <User className="absolute left-3 top-3 text-white/40" size={20} />
                                             <input
-                                                placeholder="Display Name"
+                                                placeholder="Отображаемое имя"
                                                 className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                                 value={regDisplayName}
                                                 onChange={e => setRegDisplayName(e.target.value)}
@@ -303,7 +303,7 @@ const Login = ({ onLoginSuccess }) => {
                                         <div className="relative">
                                             <span className="absolute left-4 top-3 text-white/40 font-mono">@</span>
                                             <input
-                                                placeholder="Username"
+                                                placeholder="Имя пользователя"
                                                 className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                                                 value={regUsername}
                                                 onChange={e => setRegUsername(e.target.value)}
@@ -335,7 +335,7 @@ const Login = ({ onLoginSuccess }) => {
                                         disabled={loading}
                                         className="premium-button w-full py-3 rounded-xl flex items-center justify-center gap-2 mt-2"
                                     >
-                                        {loading ? <Loader2 className="animate-spin" /> : <>Complete <CheckCircle2 size={18} /></>}
+                                        {loading ? <Loader2 className="animate-spin" /> : <>Завершить <CheckCircle2 size={18} /></>}
                                     </button>
                                 </>
                             )}

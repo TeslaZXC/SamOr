@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { API_URL } from './config';
+import { API_URL, getImageUrl } from './config';
 import { SocketProvider, useSocket } from './context/SocketContext';
 import { Lock, Send, Loader2, Video, Phone, UserPlus, Search, Menu, Settings as SettingsIcon, ArrowRight, Check, CheckCheck, Paperclip, Mic, Play, Pause, X, File as FileIcon, Download, Plus, Minus, RotateCcw, Maximize, Volume2, VolumeX, MessageSquare, Users, Hash, PlusCircle, Compass, Home } from 'lucide-react';
 import Login from './components/Login';
@@ -12,6 +12,7 @@ import CreateGroupModal from './components/CreateGroupModal';
 import CreateChannelModal from './components/CreateChannelModal';
 import GroupSettingsModal from './components/GroupSettingsModal';
 import GroupCallModal from './components/GroupCallModal';
+import ChatSearchSidebar from './components/ChatSearchSidebar';
 
 const MediaViewer = ({ src, type, onClose }) => {
   if (!src) return null;
@@ -699,14 +700,14 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
                 <button
                   onClick={() => { setShowMenu(false); onOpenSettings(); }}
                   className="w-full text-left px-3 py-2 text-sm text-white/80 hover:bg-white/5 rounded-lg flex items-center gap-3">
-                  <SettingsIcon size={18} /> Settings
+                  <SettingsIcon size={18} /> Настройки
                 </button>
                 <div className="my-1 border-t border-white/5" />
                 <button
                   onClick={handleLogout}
                   className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-3"
                 >
-                  <div className="rotate-180"><ArrowRight size={18} /></div> Log Out
+                  <div className="rotate-180"><ArrowRight size={18} /></div> Выйти
                 </button>
               </div>
             </>
@@ -718,7 +719,7 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
             <Search className="absolute left-3 top-2.5 text-white/40" size={16} />
             <input
               className="bg-white/5 border border-white/10 rounded-full pl-9 pr-4 py-2 text-sm text-white focus:bg-black/40 outline-none w-full transition-all text-left"
-              placeholder={activeTab === 'chats' ? "Search" : "Contacts"}
+              placeholder={activeTab === 'chats' ? "Поиск" : "Контакты"}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
             />
@@ -732,13 +733,13 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
           onClick={() => setActiveTab('chats')}
           className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'chats' ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5'}`}
         >
-          Chats
+          Чаты
         </button>
         <button
           onClick={() => setActiveTab('contacts')}
           className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'contacts' ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5'}`}
         >
-          Contacts
+          Контакты
         </button>
       </div>
 
@@ -746,11 +747,11 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
         {activeTab === 'chats' && (
           <>
-            {!isSearching && servers.length > 0 && (
+            {!isSearching && (
               <div className="mb-4">
                 <div className="px-3 py-2 text-[10px] font-bold text-blue-400 uppercase tracking-widest flex justify-between items-center group">
-                  <span>Communities</span>
-                  <button onClick={onCreateGroup} className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded">
+                  <span>Сообщества</span>
+                  <button onClick={onCreateGroup} className="p-0.5 hover:bg-white/10 rounded text-blue-400 hover:text-blue-300 transition-colors">
                     <Plus size={14} />
                   </button>
                 </div>
@@ -762,7 +763,7 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
                   >
                     <div className="relative w-11 h-11 shrink-0">
                       <div className="w-full h-full rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold overflow-hidden shadow-lg">
-                        {server.avatar_url ? <img src={server.avatar_url} className="w-full h-full object-cover" /> : server.name[0]}
+                        {server.avatar_url ? <img src={getImageUrl(server.avatar_url)} className="w-full h-full object-cover" /> : server.name[0]}
                       </div>
                       {activeCallsInGroups[server.id] && (
                         <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-lg border-2 border-[#1c1c1e] flex items-center justify-center animate-pulse shadow-lg shadow-green-500/20">
@@ -779,7 +780,7 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
               </div>
             )}
 
-            {!isSearching && <div className="px-3 py-2 text-[10px] font-bold text-white/30 uppercase tracking-widest text-left">Messages</div>}
+            {!isSearching && <div className="px-3 py-2 text-[10px] font-bold text-white/30 uppercase tracking-widest text-left">Сообщения</div>}
 
             {isSearching ? (
               searchResults.map(u => (
@@ -794,7 +795,7 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
                 </div>
               ))
             ) : dialogs.length === 0 && (!servers || servers.length === 0) ? (
-              <div className="text-center text-white/20 text-sm py-12">No active chats</div>
+              <div className="text-center text-white/20 text-sm py-12">Нет активных чатов</div>
             ) : (
               dialogs
                 .filter(dialog => dialog.peer && dialog.peer.display_name) // Only show dialogs with valid peer data
@@ -818,7 +819,7 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
                         {dialog.updated_at && <span className="text-[10px] text-white/30">{new Date(dialog.updated_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
                       </div>
                       <div className="flex justify-between items-center">
-                        <p className="text-xs text-white/50 truncate pr-2">{dialog.last_message || 'Media'}</p>
+                        <p className="text-xs text-white/50 truncate pr-2">{dialog.last_message || 'Медиа'}</p>
                         {dialog.unread_count > 0 && <div className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold min-w-[17px] text-center">{dialog.unread_count}</div>}
                       </div>
                     </div>
@@ -916,6 +917,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
   const [contextMenu, setContextMenu] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState(null); // Message to forward
   const [uploadProgress, setUploadProgress] = useState(null); // { progress: 0-100 }
 
@@ -962,6 +964,15 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
     }
 
     setContextMenu({ x, y, message: msg });
+  };
+
+  const handleJumpToMessage = (msgId) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('bg-blue-500/20');
+      setTimeout(() => el.classList.remove('bg-blue-500/20'), 2000);
+    }
   };
 
   // Close context menu on click elsewhere
@@ -1086,15 +1097,61 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
     if (file.type.startsWith('image/')) type = 'photo';
     else if (file.type.startsWith('video/')) type = 'video';
 
+    const args = {
+      type: type,
+      text: type === 'photo' ? 'Фото' : (type === 'video' ? 'Видео' : file.name),
+      content: url
+    };
+
+    if (activeChat.type === 'channel') {
+      args.channel_id = activeChat.channel_id;
+    } else {
+      args.peer_id = activeChat.peer.id;
+    }
+
     sendMessage({
       method: 'message.send',
-      args: {
-        type: type,
-        text: type === 'photo' ? 'Photo' : (type === 'video' ? 'Video' : file.name),
-        content: url, // Sending URL instead of base64
-        peer_id: activeChat.peer.id
-      }
+      args: args
     });
+  };
+
+  const handlePaste = async (e) => {
+    if (!e.clipboardData || !e.clipboardData.items) return;
+
+    const items = e.clipboardData.items;
+    let blob = null;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        blob = items[i].getAsFile();
+        break;
+      }
+    }
+
+    if (blob) {
+      e.preventDefault();
+      // Handle the pasted image file
+      const url = await uploadFile(blob);
+      if (!url) return;
+
+      const type = 'photo';
+      const args = {
+        type: type,
+        text: 'Фото',
+        content: url
+      };
+
+      if (activeChat.type === 'channel') {
+        args.channel_id = activeChat.channel_id;
+      } else {
+        args.peer_id = activeChat.peer.id;
+      }
+
+      sendMessage({
+        method: 'message.send',
+        args: args
+      });
+    }
   };
 
   const toggleRecording = async () => {
@@ -1122,14 +1179,21 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
           const url = await uploadFile(audioFile);
           if (url) {
+            const args = {
+              type: 'voice',
+              text: 'Голосовое сообщение',
+              content: url
+            };
+
+            if (activeChat.type === 'channel') {
+              args.channel_id = activeChat.channel_id;
+            } else {
+              args.peer_id = activeChat.peer.id;
+            }
+
             sendMessage({
               method: 'message.send',
-              args: {
-                type: 'voice',
-                text: 'Voice Message',
-                content: url,
-                peer_id: activeChat.peer.id
-              }
+              args: args
             });
           }
 
@@ -1185,7 +1249,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
         <div className="bg-white/5 p-4 rounded-full mb-4">
           <Lock size={32} className="text-white/20" />
         </div>
-        <h3 className="text-lg font-medium text-white/60">Select a chat to start messaging</h3>
+        <h3 className="text-lg font-medium text-white/60">Выберите чат, чтобы начать общение</h3>
       </div>
     );
   }
@@ -1194,348 +1258,358 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-black/10 backdrop-blur-sm relative">
-      {/* Viewer Overlay */}
-      {viewingMedia && (
-        <MediaViewer
-          src={viewingMedia.src}
-          type={viewingMedia.type}
-          onClose={() => setViewingMedia(null)}
-        />
-      )}
+    <div className="flex-1 flex h-full overflow-hidden relative">
+      <div className="flex-1 flex flex-col h-full bg-black/10 backdrop-blur-sm relative min-w-0">
+        {/* Viewer Overlay */}
+        {viewingMedia && (
+          <MediaViewer
+            src={viewingMedia.src}
+            type={viewingMedia.type}
+            onClose={() => setViewingMedia(null)}
+          />
+        )}
 
-      {/* Upload Progress Overlay (Bottom Left) */}
-      {uploadProgress && (
-        <div className="absolute bottom-20 left-6 z-20 bg-[#1c1c1e] border border-white/10 p-3 rounded-xl shadow-2xl flex items-center gap-3 w-64 animate-in slide-in-from-bottom-2">
-          <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
-            <Loader2 className="animate-spin" size={20} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex justify-between text-xs text-white/70 mb-1">
-              <span className="truncate max-w-[120px]">{uploadProgress.fileName}</span>
-              <span>{uploadProgress.progress}%</span>
+        {/* Upload Progress Overlay (Bottom Left) */}
+        {uploadProgress && (
+          <div className="absolute bottom-20 left-6 z-20 bg-[#1c1c1e] border border-white/10 p-3 rounded-xl shadow-2xl flex items-center gap-3 w-64 animate-in slide-in-from-bottom-2">
+            <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
+              <Loader2 className="animate-spin" size={20} />
             </div>
-            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${uploadProgress.progress}%` }} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-black/20">
-        <div className="flex items-center gap-3 cursor-pointer group text-left" onClick={() => activeChat?.group_id ? onOpenGroupSettings(activeChat.group_id) : onOpenProfile()}>
-          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 flex items-center justify-center text-white font-bold overflow-hidden group-hover:opacity-80 transition-opacity">
-            {currentPeer?.avatar_url ? (
-              <img src={currentPeer.avatar_url} className="w-full h-full object-cover" />
-            ) : (
-              currentPeer?.display_name?.[0] || '?'
-            )}
-          </div>
-          <div>
-            <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight">{activeChat?.name || currentPeer?.display_name || 'Unknown'}</h3>
-            {activeChat?.group_id ? (
-              <span className="text-xs text-blue-400/60 font-medium">group chat</span>
-            ) : (
-              currentPeer?.is_online ? (
-                <span className="text-xs text-blue-400 font-medium">online</span>
-              ) : (
-                <span className="text-xs text-white/40">
-                  {currentPeer?.last_seen ? `last seen ${new Date(currentPeer.last_seen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'offline'}
-                </span>
-              )
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-white/40">
-          {!activeChat.group_id && activeChat.type !== 'channel' && (
-            <>
-              <button onClick={() => currentPeer && onStartCall(currentPeer, false)} className="hover:bg-white/10 p-2 rounded-full transition-colors" disabled={!currentPeer}>
-                <Phone size={20} className="hover:text-white" />
-              </button>
-              <button onClick={() => currentPeer && onStartCall(currentPeer, true)} className="hover:bg-white/10 p-2 rounded-full transition-colors" disabled={!currentPeer}>
-                <Video size={20} className="hover:text-white" />
-              </button>
-            </>
-          )}
-          {activeChat.group_id && (
-            activeCallsInGroups[activeChat.group_id] ? (
-              <button onClick={() => onJoinGroupCall(activeChat)} className="bg-green-500/10 text-green-400 border border-green-400/20 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-green-500/20 transition-all animate-pulse shadow-lg shadow-green-500/10 active:scale-95">
-                <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
-                Join Call
-              </button>
-            ) : (
-              <button onClick={() => onStartGroupCall(activeChat)} className="hover:bg-white/10 p-2.5 rounded-xl transition-all">
-                <Video size={20} className="hover:text-white/60" />
-              </button>
-            )
-          )}
-          <button className="hover:bg-white/10 p-2.5 rounded-xl transition-all">
-            <Search size={20} className="hover:text-white/60" />
-          </button>
-        </div>
-      </div>
-
-      {activeChat.group_id && activeCallsInGroups[activeChat.group_id] && !groupCallActive && (
-        <div className="mx-6 mt-4 p-4 bg-gradient-to-r from-blue-500/20 to-purple-500/10 backdrop-blur-xl rounded-[1.5rem] border border-white/5 flex items-center justify-between animate-in slide-in-from-top-4 duration-500 shadow-xl relative overflow-hidden group">
-          <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-          <div className="flex items-center gap-4 relative z-10">
-            <div className="w-12 h-12 rounded-2xl bg-blue-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-              <Video size={24} />
-              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-[3px] border-[#1c1c1e] animate-pulse" />
-            </div>
-            <div>
-              <p className="text-white font-black text-sm tracking-tight uppercase">Live Group Call</p>
-              <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Active conversation in this group</p>
-            </div>
-          </div>
-          <button
-            onClick={() => onJoinGroupCall(activeChat)}
-            className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all shadow-2xl shadow-blue-500/30 active:scale-90 relative z-10"
-          >
-            Join Now
-          </button>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4" ref={scrollRef}>
-        {history.map((msg) => {
-          const isMe = msg.sender_id === user.id;
-          const isGroup = !!activeChat.group_id;
-          const sender = msg.sender || (isMe ? user : null);
-
-          return (
-            <div key={msg.id} id={`msg-${msg.id}`} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
-              {!isMe && isGroup && (
-                <div
-                  className="w-8 h-8 rounded-full bg-white/10 mb-1 cursor-pointer flex-shrink-0 group overflow-hidden border border-white/10"
-                  onClick={() => onOpenUserIdProfile(msg.sender_id)}
-                >
-                  {sender?.avatar_url ? (
-                    <img src={sender.avatar_url} className="w-full h-full object-cover group-hover:opacity-80 transition-opacity" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white group-hover:opacity-80 transition-opacity">
-                      {sender?.display_name?.[0] || '?'}
-                    </div>
-                  )}
-                </div>
-              )}
-              <div
-                className={`max-w-[70%] p-3 rounded-2xl relative group/msg cursor-pointer ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white/10 text-white rounded-tl-sm'}`}
-                onContextMenu={(e) => handleContextMenu(e, msg)}
-              >
-                {!isMe && isGroup && (
-                  <p
-                    className="text-xs font-bold text-blue-400 mb-1 cursor-pointer hover:underline"
-                    onClick={(e) => { e.stopPropagation(); onOpenUserIdProfile(msg.sender_id); }}
-                  >
-                    {sender?.display_name || sender?.username || 'Unknown'}
-                  </p>
-                )}
-                {/* Reply Context */}
-                {msg.reply_to_msg_id && (() => {
-                  const replyMsg = history.find(m => m.id === msg.reply_to_msg_id);
-                  const replySender = replyMsg ? (
-                    replyMsg.sender_id === user.id ? user : (
-                      activeChat.peer.id == replyMsg.sender_id ? activeChat.peer : (
-                        contacts.find(c => c.id == replyMsg.sender_id) ||
-                        dialogs.find(d => d.peer.id == replyMsg.sender_id)?.peer ||
-                        { display_name: 'Unknown', username: 'unknown' }
-                      )
-                    )
-                  ) : null;
-
-                  return (
-                    <div
-                      className={`mb-2 text-xs border-l-2 pl-2 py-1 rounded cursor-pointer transition-colors ${isMe ? 'border-white/50 bg-white/10 hover:bg-white/20' : 'border-blue-400 bg-black/20 hover:bg-black/30'}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const el = document.getElementById(`msg-${msg.reply_to_msg_id}`);
-                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      }}
-                    >
-                      {replyMsg ? (
-                        <>
-                          <p className={`font-bold mb-0.5 ${isMe ? 'text-blue-100' : 'text-blue-400'}`}>
-                            {replySender?.display_name || replySender?.username || 'Unknown'}
-                          </p>
-                          <p className="opacity-70 truncate max-w-[200px]">
-                            {replyMsg.type === 'text' ? replyMsg.content :
-                              (replyMsg.type === 'photo' ? 'Photo' :
-                                (replyMsg.type === 'video' ? 'Video' :
-                                  (replyMsg.type === 'voice' ? 'Voice Message' :
-                                    (replyMsg.type === 'file' ? 'File' : 'Media'))))}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="opacity-50 italic">Message not found</p>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Forwarded message header */}
-                {msg.fwd_from_id && (() => {
-                  // Try to find the original sender in dialogs, contacts, current user, or activeChat peer
-                  let forwardedFrom = dialogs.find(d => d.peer.id == msg.fwd_from_id)?.peer
-                    || contacts.find(c => c.id == msg.fwd_from_id)
-                    || (user.id == msg.fwd_from_id ? user : null)
-                    || (activeChat?.peer?.id == msg.fwd_from_id ? activeChat.peer : null);
-
-                  return (
-                    <div
-                      className="text-xs text-blue-300 mb-1 cursor-pointer hover:underline flex items-center gap-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Open chat with the person who sent the original message (even if it's me - Saved Messages like functionality)
-                        if (forwardedFrom) {
-                          const targetDialog = dialogs.find(d => d.peer.id == msg.fwd_from_id) || {
-                            id: 'temp_' + msg.fwd_from_id,
-                            peer: forwardedFrom,
-                            messages: []
-                          };
-                          onOpenForwardedChat && onOpenForwardedChat(targetDialog);
-                        }
-                      }}
-                    >
-                      <ArrowRight size={12} />
-                      Forwarded from {forwardedFrom?.display_name || forwardedFrom?.username || 'Unknown'}
-                    </div>
-                  );
-                })()}
-
-                {msg.type === 'call_log' && (
-                  <div className="w-full flex justify-center my-2">
-                    <span className="bg-white/10 text-white/60 text-xs px-3 py-1 rounded-full flex items-center gap-1">
-                      <Phone size={12} /> {msg.content}
-                    </span>
-                  </div>
-                )}
-
-                {msg.type === 'text' && <p>{msg.content}</p>}
-                {msg.type === 'photo' && (
-                  <div className="rounded-lg overflow-hidden mb-1 relative group w-full max-w-[280px] aspect-[4/3] bg-black/20">
-                    <img
-                      src={msg.media_url}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 cursor-pointer"
-                      onClick={() => setViewingMedia({ type: 'photo', src: msg.media_url })}
-                    />
-                  </div>
-                )}
-
-                {msg.type === 'video' && (
-                  <div
-                    className="rounded-lg overflow-hidden mb-1 relative group w-full max-w-[320px] aspect-video bg-black/50 cursor-pointer"
-                    onClick={() => setViewingMedia({ type: 'video', src: msg.media_url })}
-                  >
-                    <video
-                      src={`${msg.media_url}#t=0.1`}
-                      muted
-                      playsInline
-                      preload="metadata"
-                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-12 h-12 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center group-hover:scale-110 transition-transform border border-white/20">
-                        <Play size={20} fill="white" className="text-white ml-1" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {msg.type === 'file' && <FileMessage msg={msg} />}
-
-                {msg.type === 'voice' && <AudioMessage src={msg.media_url} />}
-
-                <div className="flex items-center justify-end gap-1 mt-1 opacity-60">
-                  <span className="text-[10px]">
-                    {new Date(msg.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  {isMe && (
-                    msg.is_read ? (
-                      <CheckCheck size={14} className="text-blue-200" /> // 2 Blue Ticks (simulated with lighter blue)
-                    ) : (
-                      <Check size={14} /> // 1 Tick
-                    )
-                  )}
-                </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between text-xs text-white/70 mb-1">
+                <span className="truncate max-w-[120px]">{uploadProgress.fileName}</span>
+                <span>{uploadProgress.progress}%</span>
+              </div>
+              <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${uploadProgress.progress}%` }} />
               </div>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        )}
 
-      {/* Context Menu - rendered in portal for reliable positioning */}
-      {contextMenu && ReactDOM.createPortal(
-        <div
-          className="fixed bg-[#1c1c1e] border border-white/10 rounded-xl shadow-2xl z-[9999] overflow-hidden w-48"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button onClick={() => handleReply(contextMenu.message)} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
-            <MessageSquare size={16} /> Reply
-          </button>
-          <button onClick={() => { onForward(contextMenu.message); setContextMenu(null); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
-            <ArrowRight size={16} /> Forward
-          </button>
-          <div className="h-px bg-white/10 my-1" />
-          <button onClick={() => handleDelete(contextMenu.message.id, false)} className="w-full text-left px-4 py-3 hover:bg-red-500/10 text-red-500 flex items-center gap-2 transition-colors">
-            <X size={16} /> Delete for me
-          </button>
-          {contextMenu.message.sender_id == user.id && (
-            <button onClick={() => handleDelete(contextMenu.message.id, true)} className="w-full text-left px-4 py-3 hover:bg-red-500/10 text-red-500 flex items-center gap-2 transition-colors">
-              <X size={16} /> Delete for everyone
-            </button>
-          )}
-        </div>,
-        document.body
-      )}
-
-      {/* Reply Context */}
-      {replyingTo && (
-        <div className="px-4 py-2 bg-black/40 border-t border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-1 h-8 bg-blue-500 rounded-full" />
+        {/* Header */}
+        <div className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-black/20">
+          <div className="flex items-center gap-3 cursor-pointer group text-left" onClick={() => activeChat?.group_id ? onOpenGroupSettings(activeChat.group_id) : onOpenProfile()}>
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 flex items-center justify-center text-white font-bold overflow-hidden group-hover:opacity-80 transition-opacity">
+              {currentPeer?.avatar_url ? (
+                <img src={currentPeer.avatar_url} className="w-full h-full object-cover" />
+              ) : (
+                currentPeer?.display_name?.[0] || '?'
+              )}
+            </div>
             <div>
-              <p className="text-blue-400 text-xs font-bold">Replying to message</p>
-              <p className="text-white/60 text-xs truncate max-w-[300px]">{replyingTo.content || 'Media'}</p>
+              <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight">{activeChat?.name || currentPeer?.display_name || 'Unknown'}</h3>
+              {activeChat?.group_id ? (
+                <span className="text-xs text-blue-400/60 font-medium">group chat</span>
+              ) : (
+                currentPeer?.is_online ? (
+                  <span className="text-xs text-blue-400 font-medium">online</span>
+                ) : (
+                  <span className="text-xs text-white/40">
+                    {currentPeer?.last_seen ? `last seen ${new Date(currentPeer.last_seen * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'offline'}
+                  </span>
+                )
+              )}
             </div>
           </div>
-          <button onClick={() => setReplyingTo(null)} className="text-white/40 hover:text-white p-1">
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2 text-white/40">
+            {!activeChat.group_id && activeChat.type !== 'channel' && (
+              <>
+                <button onClick={() => currentPeer && onStartCall(currentPeer, false)} className="hover:bg-white/10 p-2 rounded-full transition-colors" disabled={!currentPeer}>
+                  <Phone size={20} className="hover:text-white" />
+                </button>
+                <button onClick={() => currentPeer && onStartCall(currentPeer, true)} className="hover:bg-white/10 p-2 rounded-full transition-colors" disabled={!currentPeer}>
+                  <Video size={20} className="hover:text-white" />
+                </button>
+              </>
+            )}
+            {activeChat.group_id && (
+              activeCallsInGroups[activeChat.group_id] ? (
+                <button onClick={() => onJoinGroupCall(activeChat)} className="bg-green-500/10 text-green-400 border border-green-400/20 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-green-500/20 transition-all animate-pulse shadow-lg shadow-green-500/10 active:scale-95">
+                  <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                  Join Call
+                </button>
+              ) : (
+                <button onClick={() => onStartGroupCall(activeChat)} className="hover:bg-white/10 p-2.5 rounded-xl transition-all">
+                  <Video size={20} className="hover:text-white/60" />
+                </button>
+              )
+            )}
+            <button onClick={() => setShowSearch(!showSearch)} className={`hover:bg-white/10 p-2.5 rounded-xl transition-all ${showSearch ? 'bg-white/10 text-white' : ''}`}>
+              <Search size={20} className="hover:text-white/60" />
+            </button>
+          </div>
         </div>
-      )}
 
-      {/* Input */}
-      <div className="p-4 bg-black/20 border-t border-white/10">
-        <div className="max-w-4xl mx-auto flex gap-3 items-center">
-          <label className="text-white/40 hover:text-white transition-colors cursor-pointer">
-            <Paperclip size={20} />
-            <input type="file" className="hidden" onChange={handleFileSelect} />
-          </label>
-          <input
-            className="flex-1 bg-white/5 hover:bg-white/10 focus:bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none transition-all placeholder:text-white/30"
-            placeholder="Write a message..."
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
-          />
-          <button
-            onClick={toggleRecording}
-            className={`transition-colors ${isRecording ? 'text-red-500 animate-pulse' : 'text-white/40 hover:text-white'}`}
+        {activeChat.group_id && activeCallsInGroups[activeChat.group_id] && !groupCallActive && (
+          <div className="mx-6 mt-4 p-4 bg-gradient-to-r from-blue-500/20 to-purple-500/10 backdrop-blur-xl rounded-[1.5rem] border border-white/5 flex items-center justify-between animate-in slide-in-from-top-4 duration-500 shadow-xl relative overflow-hidden group">
+            <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+            <div className="flex items-center gap-4 relative z-10">
+              <div className="w-12 h-12 rounded-2xl bg-blue-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                <Video size={24} />
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-[3px] border-[#1c1c1e] animate-pulse" />
+              </div>
+              <div>
+                <p className="text-white font-black text-sm tracking-tight uppercase">Live Group Call</p>
+                <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Active conversation in this group</p>
+              </div>
+            </div>
+            <button
+              onClick={() => onJoinGroupCall(activeChat)}
+              className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all shadow-2xl shadow-blue-500/30 active:scale-90 relative z-10"
+            >
+              Join Now
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4" ref={scrollRef}>
+          {history.map((msg) => {
+            const isMe = msg.sender_id === user.id;
+            const isGroup = !!activeChat.group_id;
+            const sender = msg.sender || (isMe ? user : null);
+
+            return (
+              <div key={msg.id} id={`msg-${msg.id}`} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                {!isMe && isGroup && (
+                  <div
+                    className="w-8 h-8 rounded-full bg-white/10 mb-1 cursor-pointer flex-shrink-0 group overflow-hidden border border-white/10"
+                    onClick={() => onOpenUserIdProfile(msg.sender_id)}
+                  >
+                    {sender?.avatar_url ? (
+                      <img src={sender.avatar_url} className="w-full h-full object-cover group-hover:opacity-80 transition-opacity" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white group-hover:opacity-80 transition-opacity">
+                        {sender?.display_name?.[0] || '?'}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div
+                  className={`max-w-[70%] p-3 rounded-2xl relative group/msg cursor-pointer ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white/10 text-white rounded-tl-sm'}`}
+                  onContextMenu={(e) => handleContextMenu(e, msg)}
+                >
+                  {!isMe && isGroup && (
+                    <p
+                      className="text-xs font-bold text-blue-400 mb-1 cursor-pointer hover:underline"
+                      onClick={(e) => { e.stopPropagation(); onOpenUserIdProfile(msg.sender_id); }}
+                    >
+                      {sender?.display_name || sender?.username || 'Unknown'}
+                    </p>
+                  )}
+                  {/* Reply Context */}
+                  {msg.reply_to_msg_id && (() => {
+                    const replyMsg = history.find(m => m.id === msg.reply_to_msg_id);
+                    const replySender = replyMsg ? (
+                      replyMsg.sender_id === user.id ? user : (
+                        activeChat.peer.id == replyMsg.sender_id ? activeChat.peer : (
+                          contacts.find(c => c.id == replyMsg.sender_id) ||
+                          dialogs.find(d => d.peer.id == replyMsg.sender_id)?.peer ||
+                          { display_name: 'Unknown', username: 'unknown' }
+                        )
+                      )
+                    ) : null;
+
+                    return (
+                      <div
+                        className={`mb-2 text-xs border-l-2 pl-2 py-1 rounded cursor-pointer transition-colors ${isMe ? 'border-white/50 bg-white/10 hover:bg-white/20' : 'border-blue-400 bg-black/20 hover:bg-black/30'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const el = document.getElementById(`msg-${msg.reply_to_msg_id}`);
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }}
+                      >
+                        {replyMsg ? (
+                          <>
+                            <p className={`font-bold mb-0.5 ${isMe ? 'text-blue-100' : 'text-blue-400'}`}>
+                              {replySender?.display_name || replySender?.username || 'Unknown'}
+                            </p>
+                            <p className="opacity-70 truncate max-w-[200px]">
+                              {replyMsg.type === 'text' ? replyMsg.content :
+                                (replyMsg.type === 'photo' ? 'Photo' :
+                                  (replyMsg.type === 'video' ? 'Video' :
+                                    (replyMsg.type === 'voice' ? 'Voice Message' :
+                                      (replyMsg.type === 'file' ? 'File' : 'Media'))))}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="opacity-50 italic">Message not found</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Forwarded message header */}
+                  {msg.fwd_from_id && (() => {
+                    // Try to find the original sender in dialogs, contacts, current user, or activeChat peer
+                    let forwardedFrom = dialogs.find(d => d.peer.id == msg.fwd_from_id)?.peer
+                      || contacts.find(c => c.id == msg.fwd_from_id)
+                      || (user.id == msg.fwd_from_id ? user : null)
+                      || (activeChat?.peer?.id == msg.fwd_from_id ? activeChat.peer : null);
+
+                    return (
+                      <div
+                        className="text-xs text-blue-300 mb-1 cursor-pointer hover:underline flex items-center gap-1"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Open chat with the person who sent the original message (even if it's me - Saved Messages like functionality)
+                          if (forwardedFrom) {
+                            const targetDialog = dialogs.find(d => d.peer.id == msg.fwd_from_id) || {
+                              id: 'temp_' + msg.fwd_from_id,
+                              peer: forwardedFrom,
+                              messages: []
+                            };
+                            onOpenForwardedChat && onOpenForwardedChat(targetDialog);
+                          }
+                        }}
+                      >
+                        <ArrowRight size={12} />
+                        Forwarded from {forwardedFrom?.display_name || forwardedFrom?.username || 'Unknown'}
+                      </div>
+                    );
+                  })()}
+
+                  {msg.type === 'call_log' && (
+                    <div className="w-full flex justify-center my-2">
+                      <span className="bg-white/10 text-white/60 text-xs px-3 py-1 rounded-full flex items-center gap-1">
+                        <Phone size={12} /> {msg.content}
+                      </span>
+                    </div>
+                  )}
+
+                  {msg.type === 'text' && <p>{msg.content}</p>}
+                  {msg.type === 'photo' && (
+                    <div className="rounded-lg overflow-hidden mb-1 relative group w-full max-w-[280px] aspect-[4/3] bg-black/20">
+                      <img
+                        src={msg.media_url}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 cursor-pointer"
+                        onClick={() => setViewingMedia({ type: 'photo', src: msg.media_url })}
+                      />
+                    </div>
+                  )}
+
+                  {msg.type === 'video' && (
+                    <div
+                      className="rounded-lg overflow-hidden mb-1 relative group w-full max-w-[320px] aspect-video bg-black/50 cursor-pointer"
+                      onClick={() => setViewingMedia({ type: 'video', src: msg.media_url })}
+                    >
+                      <video
+                        src={`${msg.media_url}#t=0.1`}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-12 h-12 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center group-hover:scale-110 transition-transform border border-white/20">
+                          <Play size={20} fill="white" className="text-white ml-1" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.type === 'file' && <FileMessage msg={msg} />}
+
+                  {msg.type === 'voice' && <AudioMessage src={msg.media_url} />}
+
+                  <div className="flex items-center justify-end gap-1 mt-1 opacity-60">
+                    <span className="text-[10px]">
+                      {new Date(msg.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {isMe && (
+                      msg.is_read ? (
+                        <CheckCheck size={14} className="text-blue-200" /> // 2 Blue Ticks (simulated with lighter blue)
+                      ) : (
+                        <Check size={14} /> // 1 Tick
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Context Menu - rendered in portal for reliable positioning */}
+        {contextMenu && ReactDOM.createPortal(
+          <div
+            className="fixed bg-[#1c1c1e] border border-white/10 rounded-xl shadow-2xl z-[9999] overflow-hidden w-48"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <Mic size={20} />
-          </button>
-          <button
-            onClick={handleSend}
-            className="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-full transition-colors"
-          >
-            <Send size={20} />
-          </button>
+            <button onClick={() => handleReply(contextMenu.message)} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
+              <MessageSquare size={16} /> Ответить
+            </button>
+            <button onClick={() => { onForward(contextMenu.message); setContextMenu(null); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
+              <ArrowRight size={16} /> Переслать
+            </button>
+            <div className="h-px bg-white/10 my-1" />
+            <button onClick={() => handleDelete(contextMenu.message.id, false)} className="w-full text-left px-4 py-3 hover:bg-red-500/10 text-red-500 flex items-center gap-2 transition-colors">
+              <X size={16} /> Удалить у меня
+            </button>
+            {contextMenu.message.sender_id == user.id && (
+              <button onClick={() => handleDelete(contextMenu.message.id, true)} className="w-full text-left px-4 py-3 hover:bg-red-500/10 text-red-500 flex items-center gap-2 transition-colors">
+                <X size={16} /> Удалить у всех
+              </button>
+            )}
+          </div>,
+          document.body
+        )}
+
+        {/* Reply Context */}
+        {replyingTo && (
+          <div className="px-4 py-2 bg-black/40 border-t border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="w-1 h-8 bg-blue-500 rounded-full" />
+              <div>
+                <p className="text-blue-400 text-xs font-bold">Ответ на сообщение</p>
+                <p className="text-white/60 text-xs truncate max-w-[300px]">{replyingTo.content || 'Медиа'}</p>
+              </div>
+            </div>
+            <button onClick={() => setReplyingTo(null)} className="text-white/40 hover:text-white p-1">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="p-4 bg-black/20 border-t border-white/10">
+          <div className="max-w-4xl mx-auto flex gap-3 items-center">
+            <label className="text-white/40 hover:text-white transition-colors cursor-pointer">
+              <Paperclip size={20} />
+              <input type="file" className="hidden" onChange={handleFileSelect} />
+            </label>
+            <input
+              className="flex-1 bg-white/5 hover:bg-white/10 focus:bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none transition-all placeholder:text-white/30"
+              placeholder="Написать сообщение..."
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              onPaste={handlePaste}
+            />
+            <button
+              onClick={toggleRecording}
+              className={`transition-colors ${isRecording ? 'text-red-500 animate-pulse' : 'text-white/40 hover:text-white'}`}
+            >
+              <Mic size={20} />
+            </button>
+            <button
+              onClick={handleSend}
+              className="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-full transition-colors"
+            >
+              <Send size={20} />
+            </button>
+          </div>
         </div>
       </div>
+      {showSearch && (
+        <ChatSearchSidebar
+          activeChat={activeChat}
+          onClose={() => setShowSearch(false)}
+          onJumpToMessage={handleJumpToMessage}
+        />
+      )}
     </div>
   );
 };
@@ -1584,7 +1658,10 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
         setServers(lastMsg.groups);
         setLoadingGroups(false);
       } else if (lastMsg.type === 'groups.create_success') {
-        setServers(prev => [...prev, lastMsg.group]);
+        setServers(prev => {
+          if (prev.find(s => s.id === lastMsg.group.id)) return prev;
+          return [...prev, lastMsg.group];
+        });
         setActiveServerId(lastMsg.group.id);
       } else if (lastMsg.type === 'groups.channel_created') {
         setServers(prev => prev.map(s => {
@@ -1610,9 +1687,20 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
             }
           }));
         }
-      } else if (lastMsg.type === 'groups.new_membership') {
-        sendMessage({ method: 'groups.list' });
+      } else if (lastMsg.type === 'groups.deleted') {
+        const deletedId = lastMsg.group_id;
+        setServers(prev => prev.filter(s => s.id !== deletedId));
+
+        if (activeServerId === deletedId) {
+          setActiveServerId('home');
+        }
+
+        if (activeChat?.group_id === deletedId) {
+          setActiveChat(null);
+        }
       }
+    } else if (lastMsg.type === 'groups.new_membership') {
+      sendMessage({ method: 'groups.list' });
     }
   }, [messages, activeChat]); // Added activeChat to deps for group updates
 
@@ -1821,13 +1909,13 @@ const AppContent = () => {
 
   // Group Call State
   const [groupCallActive, setGroupCallActive] = useState(false);
-  const [activeGroupCall, setActiveGroupCall] = useState(null); // { id, name, avatar_url }
+  const [activeGroupCall, setActiveGroupCall] = useState(null); // {id, name, avatar_url}
   const [groupParticipants, setGroupParticipants] = useState([]);
-  const [groupRemoteStreams, setGroupRemoteStreams] = useState({}); // { userId: stream }
+  const [groupRemoteStreams, setGroupRemoteStreams] = useState({}); // {userId: stream }
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(true);
-  const groupPeerConnections = useRef({}); // { userId: pc }
-  const [activeCallsInGroups, setActiveCallsInGroups] = useState({}); // { groupId: true }
+  const groupPeerConnections = useRef({}); // {userId: pc }
+  const [activeCallsInGroups, setActiveCallsInGroups] = useState({}); // {groupId: true }
 
   // Ringtone (Blob-based for background playback)
   const ringtoneAudioRef = useRef(null);
@@ -2114,7 +2202,7 @@ const AppContent = () => {
         method: 'message.send',
         args: {
           type: 'call_log',
-          text: 'Declined Call',
+          text: 'Звонок отклонен',
           peer_id: activeCallPeer.id
         }
       });
