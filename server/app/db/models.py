@@ -10,6 +10,9 @@ BASE_DIR = os.path.expanduser("~")
 DB_PATH = os.path.join(BASE_DIR, "samor_safe_db", "samor.db")
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
+# Ensure directory exists
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
 print(f"🔹 Using SAFE Database Path: {DB_PATH}") # Debug print
 engine = create_async_engine(DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
