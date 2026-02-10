@@ -94,7 +94,10 @@ const ProfileSetup = ({ tempToken, onSetupComplete }) => {
                             placeholder="Display Name (e.g. John Doe)"
                             className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none"
                             value={displayName}
-                            onChange={e => setDisplayName(e.target.value)}
+                            onChange={e => {
+                                const val = e.target.value.replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s]/g, '').slice(0, 16);
+                                setDisplayName(val);
+                            }}
                         />
                     </div>
                     <div className="relative">
@@ -104,7 +107,10 @@ const ProfileSetup = ({ tempToken, onSetupComplete }) => {
                             placeholder="Username (Unique)"
                             className="premium-input w-full pl-10 pr-4 py-3 rounded-xl outline-none font-mono"
                             value={username}
-                            onChange={e => setUsername(e.target.value)}
+                            onChange={e => {
+                                const val = e.target.value.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_]/g, '').slice(0, 16);
+                                setUsername(val);
+                            }}
                         />
                     </div>
 

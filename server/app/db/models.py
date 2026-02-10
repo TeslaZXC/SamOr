@@ -1,9 +1,16 @@
+import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Float
 
-DATABASE_URL = "sqlite+aiosqlite:///./samor.db"
+# Robust path resolution:
+# Start fresh. We moved DB to C:\Users\Artyrka\samor_safe_db\samor.db to escape project watchers.
+# This path is OUTSIDE the project root, so uvicorn will never see changes.
+BASE_DIR = os.path.expanduser("~")
+DB_PATH = os.path.join(BASE_DIR, "samor_safe_db", "samor.db")
+DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
+print(f"🔹 Using SAFE Database Path: {DB_PATH}") # Debug print
 engine = create_async_engine(DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
@@ -94,6 +101,11 @@ class Dialog(Base):
     last_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
     unread_count = Column(Integer, default=0)
     updated_at = Column(Float)
+
+class BannedEmail(Base):
+    __tablename__ = "banned_emails"
+    email = Column(String, primary_key=True, index=True)
+    created_at = Column(Float)
 
 async def init_db():
     async with engine.begin() as conn:

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { API_URL, getImageUrl } from './config';
 import { SocketProvider, useSocket } from './context/SocketContext';
-import { Lock, Send, Loader2, Video, Phone, UserPlus, Search, Menu, Settings as SettingsIcon, ArrowRight, Check, CheckCheck, Paperclip, Mic, Play, Pause, X, File as FileIcon, Download, Plus, Minus, RotateCcw, Maximize, Volume2, VolumeX, MessageSquare, Users, Hash, PlusCircle, Compass, Home } from 'lucide-react';
+import { Lock, Send, Loader2, Video, Phone, UserPlus, Search, Menu, Settings as SettingsIcon, ArrowRight, ArrowLeft, Check, CheckCheck, Paperclip, Mic, Play, Pause, X, File as FileIcon, Download, Plus, Minus, RotateCcw, Maximize, Volume2, VolumeX, MessageSquare, Users, Hash, PlusCircle, Compass, Home, Image, Shield, Ban } from 'lucide-react';
 import Login from './components/Login';
 import ProfileSetup from './components/ProfileSetup';
 import Settings from './components/Settings';
@@ -13,6 +13,10 @@ import CreateChannelModal from './components/CreateChannelModal';
 import GroupSettingsModal from './components/GroupSettingsModal';
 import GroupCallModal from './components/GroupCallModal';
 import ChatSearchSidebar from './components/ChatSearchSidebar';
+import GroupCallBanner from './components/GroupCallBanner';
+import ForwardModal from './components/ForwardModal';
+import AdminPanel from './components/AdminPanel';
+
 
 const MediaViewer = ({ src, type, onClose }) => {
   if (!src) return null;
@@ -480,7 +484,8 @@ const AudioMessage = ({ src }) => {
   );
 };
 
-const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = [], onSelectGroup, onCreateGroup, activeCallsInGroups = {} }) => {
+const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, onOpenAdminPanel, servers = [], setServers, onSelectGroup, onCreateGroup, activeCallsInGroups = {}, playChime }) => {
+  const processedMsgsRef = useRef(new Set());
   const { sendMessage, messages, dialogs, contacts, setDialogs, setContacts } = useSocket();
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -522,9 +527,11 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
 
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg) {
+    if (lastMsg && !processedMsgsRef.current.has(lastMsg)) {
+      processedMsgsRef.current.add(lastMsg);
       if (lastMsg.type === 'dialogs.list') {
-        setDialogs(lastMsg.dialogs);
+        const validDialogs = (lastMsg.dialogs || []).filter(d => d.peer && d.peer.display_name);
+        setDialogs(validDialogs);
         setLoading(false);
       } else if (lastMsg.type === 'user.list_result') {
         setContacts(lastMsg.users);
@@ -539,6 +546,51 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
       // Real-time Updates
       if (lastMsg.type === 'message.new') {
         const msg = lastMsg.message;
+
+        // --- Notifications ---
+        const isFromMe = lastMsg.sender_id === user.id;
+        const isChannel = !!(lastMsg.channel_id || msg.channel_id);
+        const targetId = isChannel ? `channel_${lastMsg.channel_id || msg.channel_id}` : (lastMsg.sender_id === user.id ? lastMsg.peer_id : lastMsg.sender_id);
+        const isCurrentChat = activeChat?.id === targetId || (activeChat?.channel_id === (lastMsg.channel_id || msg.channel_id) && isChannel);
+
+        if (!isFromMe && !isCurrentChat) {
+          playChime?.();
+          if (Notification.permission === 'granted') {
+            let title = "New Message";
+            if (isChannel) {
+              const group = servers.find(s => s.channels?.some(c => c.id === (lastMsg.channel_id || msg.channel_id)));
+              title = group ? `Group: ${group.name}` : "Group Message";
+            } else {
+              title = msg.sender?.display_name || "New Message";
+            }
+            new Notification(title, {
+              body: msg.content,
+              icon: msg.sender?.avatar_url || "/logo.png"
+            });
+          }
+        }
+
+        // --- FIX: Group Messages ---
+        // If message has a channel_id, it belongs to a group/channel.
+        if (isChannel) {
+          console.log("DEBUG: Updating group last message and unread count", lastMsg);
+
+          setServers(prev => prev.map(s => {
+            const hasChannel = s.channels?.some(c => c.id === (lastMsg.channel_id || msg.channel_id));
+            if (hasChannel) {
+              return {
+                ...s,
+                last_message: msg.type === 'text' ? msg.content : `[${msg.type}]`,
+                updated_at: msg.created_at,
+                unread_count: isCurrentChat ? (s.unread_count || 0) : ((s.unread_count || 0) + 1)
+              };
+            }
+            return s;
+          }));
+
+          return;
+        }
+
         setDialogs(prev => {
           let updated = [...prev];
           const idx = updated.findIndex(d => d.peer.id === (lastMsg.sender_id === user.id ? lastMsg.peer_id : lastMsg.sender_id));
@@ -564,66 +616,9 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
       } else if (lastMsg.type === 'messages.read_done') {
         // I read this peer's messages. Set unread to 0.
         setDialogs(prev => prev.map(d => d.peer.id === lastMsg.peer_id ? { ...d, unread_count: 0 } : d));
-      } else if (lastMsg.type === 'user.status') {
-        const { user_id, status, last_seen } = lastMsg;
-        console.log("DEBUG: user.status received", lastMsg);
-
-        // Only update if we actually have this user in our dialogs or contacts
-        // This prevents creating ghost/unknown users
-        const hasInDialogs = dialogs.some(d => d.peer?.id === user_id && d.peer?.display_name);
-        const hasInContacts = contacts.some(c => c.id === user_id && c.display_name);
-
-        if (!hasInDialogs && !hasInContacts) {
-          console.log("DEBUG: Ignoring status update for unknown user", user_id);
-          return; // Ignore status updates for users we don't know
-        }
-
-        const updatePeer = (peer) => {
-          if (!peer.display_name) {
-            console.error("DEBUG: Skipping update for peer without name!", peer);
-            return peer; // Return unchanged if invalid
-          }
-          return {
-            ...peer,
-            is_online: status === 'online',
-            last_seen: last_seen
-          };
-        };
-
-        setDialogs(prev => prev.map(d => {
-          if (d.peer.id == user_id && d.peer.display_name) {
-            console.log("DEBUG: Updating dialog peer", d.peer);
-            return { ...d, peer: updatePeer(d.peer) };
-          }
-          return d;
-        }));
-
-        setContacts(prev => prev.map(c => {
-          if (c.id == user_id && c.display_name) return updatePeer(c);
-          return c;
-        }));
-
-        // Also update activeChat if it matches (for immediate header update)
-        setActiveChat(prev => {
-          if (prev?.peer?.id == user_id && prev?.peer?.display_name) {
-            console.log("DEBUG: Updating activeChat peer from", prev.peer);
-            const newIsOnline = status === 'online';
-            if (prev.peer.is_online !== newIsOnline || prev.peer.last_seen !== last_seen) {
-              return {
-                ...prev,
-                peer: {
-                  ...prev.peer,
-                  is_online: newIsOnline,
-                  last_seen: last_seen
-                }
-              };
-            }
-          }
-          return prev;
-        });
       }
     }
-  }, [messages, isSearching, activeChat, user]);
+  }, [messages, isSearching, activeChat, user, playChime, servers]);
 
   const handleSelect = (item, isSearch = false) => {
     // Validate that the item has valid peer data
@@ -674,7 +669,8 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
   );
 
   return (
-    <div className="w-80 h-full border-r border-white/10 flex flex-col bg-black/20 backdrop-blur-xl relative shrink-0">
+    <div className={`h-full border-r border-white/10 flex-col bg-black/20 backdrop-blur-xl relative shrink-0 transition-all ${activeChat ? 'hidden md:flex w-80' : 'flex w-full md:w-80'}`}>
+
       {/* Header */}
       <div className="p-4 border-b border-white/10 flex items-center gap-3">
         <div className="relative">
@@ -702,6 +698,14 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
                   className="w-full text-left px-3 py-2 text-sm text-white/80 hover:bg-white/5 rounded-lg flex items-center gap-3">
                   <SettingsIcon size={18} /> Настройки
                 </button>
+                {user.email === 'gtesla814@gmail.com' && (
+                  <button
+                    onClick={() => { setShowMenu(false); onOpenAdminPanel(); }}
+                    className="w-full text-left px-3 py-2 text-sm text-blue-400 hover:bg-blue-500/10 rounded-lg flex items-center gap-3"
+                  >
+                    <Shield size={18} /> Админ Панель
+                  </button>
+                )}
                 <div className="my-1 border-t border-white/5" />
                 <button
                   onClick={handleLogout}
@@ -772,8 +776,14 @@ const Sidebar = ({ user, activeChat, setActiveChat, onOpenSettings, servers = []
                       )}
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col justify-center text-left">
-                      <h3 className="font-semibold text-white truncate text-sm">{server.name}</h3>
-                      <p className="text-xs text-white/40 truncate">{server.channels?.length || 0} channels</p>
+                      <div className="flex justify-between items-baseline mb-0.5">
+                        <h3 className="font-semibold text-white truncate text-sm">{server.name}</h3>
+                        {server.updated_at && <span className="text-[10px] text-white/30">{new Date(server.updated_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-white/40 truncate pr-2">{server.last_message || `${server.channels?.length || 0} channels`}</p>
+                        {server.unread_count > 0 && <div className="bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold min-w-[17px] text-center">{server.unread_count}</div>}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -883,8 +893,17 @@ const ServerList = ({ servers, activeServer, onSelect, onCreate, activeCallsInGr
             server.name.substring(0, 2).toUpperCase()
           )}
           {activeCallsInGroups[server.id] && (
-            <div className="absolute top-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-[#1e1e1e] flex items-center justify-center animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]">
+            <div className="absolute top-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-[#1e1e1e] flex items-center justify-center animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)] group/call">
               <Video size={8} className="text-white" />
+              {/* Tooltip showing active participants */}
+              {server.active_participants && server.active_participants.length > 0 && (
+                <div className="absolute left-6 top-0 bg-black/90 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover/call:opacity-100 transition-opacity pointer-events-none z-50 min-w-max">
+                  <div className="font-semibold mb-0.5">В звонке ({server.active_participants.length}):</div>
+                  {server.active_participants.map((p, i) => (
+                    <div key={i} className="text-white/80">{p.display_name}</div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -904,7 +923,8 @@ const ServerList = ({ servers, activeServer, onSelect, onCreate, activeCallsInGr
 
 
 
-const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStartCall, onStartGroupCall, onJoinGroupCall, activeCallsInGroups = {}, onForward, onOpenForwardedChat, onSelectChannel, onCreateChannel, onOpenGroupSettings, dialogs = [], contacts = [] }) => {
+const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStartCall, onStartGroupCall, onJoinGroupCall, activeCallsInGroups = {}, groupCallParticipantsMap = {}, onForward, onOpenForwardedChat, onSelectChannel, onCreateChannel, onOpenGroupSettings, dialogs = [], contacts = [], groupCallActive, onBack }) => {
+  const processedMsgsRef = useRef(new Set());
   const { sendMessage, messages, status } = useSocket();
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState('');
@@ -918,8 +938,9 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
   const [contextMenu, setContextMenu] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
-  const [forwardingMessage, setForwardingMessage] = useState(null); // Message to forward
+
   const [uploadProgress, setUploadProgress] = useState(null); // { progress: 0-100 }
+  const [pendingFiles, setPendingFiles] = useState([]); // Array of { file, type, name, id }
 
 
   // Resolve peer from fresh data (dialogs/contacts) or fallback to activeChat.peer
@@ -927,19 +948,42 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
     // If activeChat is missing or malformed
     if (!activeChat?.peer) return null;
 
+    // For groups/channels, no peer lookup needed
+    if (activeChat.type === 'channel' || activeChat.group_id) return null;
+
     const peerId = activeChat.peer.id;
-    if (!peerId) return activeChat.peer;
+    const peerUsername = activeChat.peer.username;
+    const peerDisplayName = activeChat.peer.display_name;
 
-    // Try to find in dialogs first (most likely to have fresh status)
-    const fromDialog = dialogs.find(d => d.peer.id == peerId); // Loose check
+    // Strategy 1: Match by ID (loose equality for string/number flexibility)
+    let fromDialog = dialogs.find(d => d.peer?.id == peerId);
 
-    if (fromDialog?.peer) return fromDialog.peer;
+    // Strategy 2: If ID match failed, try matching by username
+    if (!fromDialog && peerUsername) {
+      fromDialog = dialogs.find(d => d.peer?.username === peerUsername);
+    }
 
-    // Try contacts
-    const fromContact = contacts.find(c => c.id == peerId); // Loose check
+    // Strategy 3: If still no match, try matching by display_name
+    if (!fromDialog && peerDisplayName) {
+      fromDialog = dialogs.find(d => d.peer?.display_name === peerDisplayName);
+    }
+
+    if (fromDialog?.peer && fromDialog.peer.display_name) {
+      return fromDialog.peer;
+    }
+
+    // Try contacts with same multi-strategy approach
+    let fromContact = contacts.find(c => c.id == peerId);
+    if (!fromContact && peerUsername) {
+      fromContact = contacts.find(c => c.username === peerUsername);
+    }
+    if (!fromContact && peerDisplayName) {
+      fromContact = contacts.find(c => c.display_name === peerDisplayName);
+    }
+
     if (fromContact) return fromContact;
 
-    // Fallback
+    // Ultimate fallback: use activeChat.peer as-is
     return activeChat.peer;
   }, [activeChat, dialogs, contacts]);
 
@@ -996,7 +1040,8 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg) {
+    if (lastMsg && !processedMsgsRef.current.has(lastMsg)) {
+      processedMsgsRef.current.add(lastMsg);
       const isCurrentChatHistory = (
         (lastMsg.type === 'messages.history' && (
           (activeChat?.type === 'channel' && lastMsg.channel_id === activeChat.channel_id) ||
@@ -1032,8 +1077,6 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
         }
       } else if (lastMsg.type === 'messages.deleted') {
         setHistory(prev => prev.filter(m => !lastMsg.ids.includes(m.id)));
-      } else if (lastMsg.type === 'messages.forward_done') {
-        setForwardingMessage(null); // Clear forward state
       }
     }
   }, [messages, activeChat, user]);
@@ -1085,72 +1128,43 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
     });
   };
 
-  const handleFileSelect = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
 
-    // Optimistic / Loading state could be added here
-    const url = await uploadFile(file);
-    if (!url) return;
+    const newFiles = files.map(file => {
+      let type = 'file';
+      if (file.type.startsWith('image/')) type = 'photo';
+      else if (file.type.startsWith('video/')) type = 'video';
 
-    let type = 'file';
-    if (file.type.startsWith('image/')) type = 'photo';
-    else if (file.type.startsWith('video/')) type = 'video';
-
-    const args = {
-      type: type,
-      text: type === 'photo' ? 'Фото' : (type === 'video' ? 'Видео' : file.name),
-      content: url
-    };
-
-    if (activeChat.type === 'channel') {
-      args.channel_id = activeChat.channel_id;
-    } else {
-      args.peer_id = activeChat.peer.id;
-    }
-
-    sendMessage({
-      method: 'message.send',
-      args: args
+      return {
+        file,
+        type,
+        name: file.name,
+        id: Math.random().toString(36).substr(2, 9)
+      };
     });
+
+    setPendingFiles(prev => [...prev, ...newFiles]);
+    e.target.value = '';
   };
 
   const handlePaste = async (e) => {
     if (!e.clipboardData || !e.clipboardData.items) return;
-
     const items = e.clipboardData.items;
-    let blob = null;
-
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf("image") !== -1) {
-        blob = items[i].getAsFile();
-        break;
+        const blob = items[i].getAsFile();
+        if (blob) {
+          e.preventDefault();
+          setPendingFiles(prev => [...prev, {
+            file: blob,
+            type: 'photo',
+            name: `pasted_image_${Date.now()}.png`,
+            id: Math.random().toString(36).substr(2, 9)
+          }]);
+        }
       }
-    }
-
-    if (blob) {
-      e.preventDefault();
-      // Handle the pasted image file
-      const url = await uploadFile(blob);
-      if (!url) return;
-
-      const type = 'photo';
-      const args = {
-        type: type,
-        text: 'Фото',
-        content: url
-      };
-
-      if (activeChat.type === 'channel') {
-        args.channel_id = activeChat.channel_id;
-      } else {
-        args.peer_id = activeChat.peer.id;
-      }
-
-      sendMessage({
-        method: 'message.send',
-        args: args
-      });
     }
   };
 
@@ -1160,7 +1174,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
       setIsRecording(false);
     } else {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert("Microphone access requires HTTPS or localhost. Please enable SSL/TLS on your server.");
+        alert("Microphone access requires HTTPS or localhost.");
         return;
       }
       try {
@@ -1168,42 +1182,22 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
         const recorder = new MediaRecorder(stream);
         mediaRecorderRef.current = recorder;
         audioChunksRef.current = [];
-
-        recorder.ondataavailable = (e) => {
-          audioChunksRef.current.push(e.data);
-        };
-
+        recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
         recorder.onstop = async () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           const audioFile = new File([audioBlob], "voice_message.webm", { type: "audio/webm" });
-
           const url = await uploadFile(audioFile);
           if (url) {
-            const args = {
-              type: 'voice',
-              text: 'Голосовое сообщение',
-              content: url
-            };
-
-            if (activeChat.type === 'channel') {
-              args.channel_id = activeChat.channel_id;
-            } else {
-              args.peer_id = activeChat.peer.id;
-            }
-
-            sendMessage({
-              method: 'message.send',
-              args: args
-            });
+            const args = { type: 'voice', text: 'Голосовое сообщение', content: url };
+            if (activeChat.type === 'channel') args.channel_id = activeChat.channel_id;
+            else args.peer_id = activeChat.peer.id;
+            sendMessage({ method: 'message.send', args });
           }
-
           stream.getTracks().forEach(track => track.stop());
         };
-
         recorder.start();
         setIsRecording(true);
       } catch (err) {
-        console.error("Mic error:", err);
         alert("Microphone access denied");
       }
     }
@@ -1211,7 +1205,6 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
   const handleReply = (msg) => {
     setReplyingTo(msg);
-    // Focus input
   };
 
   const handleDelete = (msgId, forAll) => {
@@ -1222,30 +1215,42 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
     setContextMenu(null);
   };
 
-  const handleSend = () => {
-    if ((!input.trim() && !uploadProgress) || !activeChat) return;
-
-    // Check if reply
-    const args = { type: 'text', text: input };
-
-    if (activeChat.type === 'channel') {
-      args.channel_id = activeChat.channel_id;
-    } else {
-      args.peer_id = activeChat.peer.id;
-    }
-
-    if (replyingTo) {
-      args.reply_to_msg_id = replyingTo.id;
-    }
-
-    sendMessage({ method: 'message.send', args });
+  const handleSend = async () => {
+    if ((!input.trim() && pendingFiles.length === 0) || !activeChat) return;
+    const currentPendingFiles = [...pendingFiles];
+    const currentInput = input.trim();
+    setPendingFiles([]);
     setInput('');
-    setReplyingTo(null); // Clear reply state
+    setReplyingTo(null);
+    const sendTextMessage = (text) => {
+      const args = { type: 'text', text };
+      if (activeChat.type === 'channel') args.channel_id = activeChat.channel_id;
+      else args.peer_id = activeChat.peer.id;
+      if (replyingTo) args.reply_to_msg_id = replyingTo.id;
+      sendMessage({ method: 'message.send', args });
+    };
+    if (currentPendingFiles.length > 0) {
+      for (const pFile of currentPendingFiles) {
+        const url = await uploadFile(pFile.file);
+        if (url) {
+          const messageArgs = {
+            type: pFile.type,
+            text: pFile.type === 'photo' ? 'Фото' : (pFile.type === 'video' ? 'Видео' : pFile.name),
+            content: url
+          };
+          if (activeChat.type === 'channel') messageArgs.channel_id = activeChat.channel_id;
+          else messageArgs.peer_id = activeChat.peer.id;
+          if (replyingTo) messageArgs.reply_to_msg_id = replyingTo.id;
+          sendMessage({ method: 'message.send', args: messageArgs });
+        }
+      }
+    }
+    if (currentInput) sendTextMessage(currentInput);
   };
 
   if (!activeChat) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-black/10 backdrop-blur-sm">
+      <div className="flex-1 hidden md:flex flex-col items-center justify-center p-8 text-center bg-black/10 backdrop-blur-sm">
         <div className="bg-white/5 p-4 rounded-full mb-4">
           <Lock size={32} className="text-white/20" />
         </div>
@@ -1258,7 +1263,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
 
   return (
-    <div className="flex-1 flex h-full overflow-hidden relative">
+    <div className="flex h-full overflow-hidden relative w-full md:flex-1">
       <div className="flex-1 flex flex-col h-full bg-black/10 backdrop-blur-sm relative min-w-0">
         {/* Viewer Overlay */}
         {viewingMedia && (
@@ -1290,17 +1295,25 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
         {/* Header */}
         <div className="h-16 px-6 border-b border-white/10 flex items-center justify-between bg-black/20">
           <div className="flex items-center gap-3 cursor-pointer group text-left" onClick={() => activeChat?.group_id ? onOpenGroupSettings(activeChat.group_id) : onOpenProfile()}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onBack && onBack(); }}
+              className="md:hidden p-1.5 -ml-2 text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors"
+            >
+              <ArrowLeft size={20} />
+            </button>
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-400 to-purple-400 flex items-center justify-center text-white font-bold overflow-hidden group-hover:opacity-80 transition-opacity">
-              {currentPeer?.avatar_url ? (
-                <img src={currentPeer.avatar_url} className="w-full h-full object-cover" />
+              {(currentPeer?.avatar_url || activeChat?.peer?.avatar_url) ? (
+                <img src={currentPeer?.avatar_url || activeChat?.peer?.avatar_url} className="w-full h-full object-cover" />
               ) : (
-                currentPeer?.display_name?.[0] || '?'
+                (currentPeer?.display_name || activeChat?.peer?.display_name || activeChat?.peer?.username || activeChat?.name)?.[0]?.toUpperCase() || 'U'
               )}
             </div>
             <div>
-              <h3 className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight">{activeChat?.name || currentPeer?.display_name || 'Unknown'}</h3>
-              {activeChat?.group_id ? (
-                <span className="text-xs text-blue-400/60 font-medium">group chat</span>
+              {(activeChat?.type === 'channel' || activeChat?.group_id)
+                ? (activeChat?.name || currentPeer?.display_name || activeChat?.peer?.display_name || 'Группа')
+                : (currentPeer?.display_name || activeChat?.peer?.display_name || currentPeer?.username || activeChat?.peer?.username || 'Пользователь')}
+              {activeChat.group_id ? (
+                <span className="text-xs text-white/40">group chat</span>
               ) : (
                 currentPeer?.is_online ? (
                   <span className="text-xs text-blue-400 font-medium">online</span>
@@ -1323,17 +1336,10 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
                 </button>
               </>
             )}
-            {activeChat.group_id && (
-              activeCallsInGroups[activeChat.group_id] ? (
-                <button onClick={() => onJoinGroupCall(activeChat)} className="bg-green-500/10 text-green-400 border border-green-400/20 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-green-500/20 transition-all animate-pulse shadow-lg shadow-green-500/10 active:scale-95">
-                  <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
-                  Join Call
-                </button>
-              ) : (
-                <button onClick={() => onStartGroupCall(activeChat)} className="hover:bg-white/10 p-2.5 rounded-xl transition-all">
-                  <Video size={20} className="hover:text-white/60" />
-                </button>
-              )
+            {activeChat.group_id && !activeCallsInGroups[activeChat.channel_id] && (
+              <button onClick={() => onStartGroupCall(activeChat)} className="hover:bg-white/10 p-2.5 rounded-xl transition-all">
+                <Video size={20} className="hover:text-white/60" />
+              </button>
             )}
             <button onClick={() => setShowSearch(!showSearch)} className={`hover:bg-white/10 p-2.5 rounded-xl transition-all ${showSearch ? 'bg-white/10 text-white' : ''}`}>
               <Search size={20} className="hover:text-white/60" />
@@ -1341,26 +1347,15 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
           </div>
         </div>
 
-        {activeChat.group_id && activeCallsInGroups[activeChat.group_id] && !groupCallActive && (
-          <div className="mx-6 mt-4 p-4 bg-gradient-to-r from-blue-500/20 to-purple-500/10 backdrop-blur-xl rounded-[1.5rem] border border-white/5 flex items-center justify-between animate-in slide-in-from-top-4 duration-500 shadow-xl relative overflow-hidden group">
-            <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-            <div className="flex items-center gap-4 relative z-10">
-              <div className="w-12 h-12 rounded-2xl bg-blue-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-                <Video size={24} />
-                <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-[3px] border-[#1c1c1e] animate-pulse" />
-              </div>
-              <div>
-                <p className="text-white font-black text-sm tracking-tight uppercase">Live Group Call</p>
-                <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest">Active conversation in this group</p>
-              </div>
-            </div>
-            <button
-              onClick={() => onJoinGroupCall(activeChat)}
-              className="px-8 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all shadow-2xl shadow-blue-500/30 active:scale-90 relative z-10"
-            >
-              Join Now
-            </button>
-          </div>
+
+        {activeChat.group_id && activeCallsInGroups[activeChat.channel_id] && !groupCallActive && (
+          <GroupCallBanner
+            participants={activeCallsInGroups[activeChat.channel_id].participants}
+            onJoin={() => onJoinGroupCall(activeChat)}
+            onLeave={() => sendMessage({ method: 'groups.call.leave', args: { group_id: activeChat.channel_id } })}
+            isInCall={false}
+            currentUserId={user.id}
+          />
         )}
 
         {/* Messages */}
@@ -1442,30 +1437,34 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
 
                   {/* Forwarded message header */}
                   {msg.fwd_from_id && (() => {
-                    // Try to find the original sender in dialogs, contacts, current user, or activeChat peer
-                    let forwardedFrom = dialogs.find(d => d.peer.id == msg.fwd_from_id)?.peer
+                    // Use metadata from backend if available, otherwise fallback to local search
+                    let forwardedFrom = msg.fwd_from_user
+                      || dialogs.find(d => d.peer && d.peer.id == msg.fwd_from_id)?.peer
                       || contacts.find(c => c.id == msg.fwd_from_id)
                       || (user.id == msg.fwd_from_id ? user : null)
                       || (activeChat?.peer?.id == msg.fwd_from_id ? activeChat.peer : null);
 
                     return (
                       <div
-                        className="text-xs text-blue-300 mb-1 cursor-pointer hover:underline flex items-center gap-1"
+                        className="text-xs text-blue-300/80 mb-1.5 flex items-center gap-1.5 cursor-pointer hover:text-blue-200 transition-colors group/fwd"
                         onClick={(e) => {
                           e.stopPropagation();
-                          // Open chat with the person who sent the original message (even if it's me - Saved Messages like functionality)
-                          if (forwardedFrom) {
-                            const targetDialog = dialogs.find(d => d.peer.id == msg.fwd_from_id) || {
-                              id: 'temp_' + msg.fwd_from_id,
-                              peer: forwardedFrom,
+                          if (msg.fwd_from_id) {
+                            const target = forwardedFrom || { id: msg.fwd_from_id, display_name: 'Пользователь' };
+                            const targetDialog = dialogs.find(d => d.peer && d.peer.id == (target.id || msg.fwd_from_id)) || {
+                              id: 'temp_' + (target.id || msg.fwd_from_id),
+                              peer: target,
                               messages: []
                             };
                             onOpenForwardedChat && onOpenForwardedChat(targetDialog);
                           }
                         }}
                       >
-                        <ArrowRight size={12} />
-                        Forwarded from {forwardedFrom?.display_name || forwardedFrom?.username || 'Unknown'}
+                        <ArrowRight size={12} className="text-blue-400 group-hover/fwd:translate-x-0.5 transition-transform" />
+                        <span className="opacity-70">Переслано от</span>
+                        <span className="font-semibold underline-offset-2 group-hover/fwd:underline">
+                          {forwardedFrom?.display_name || forwardedFrom?.username || 'Пользователь'}
+                        </span>
                       </div>
                     );
                   })()}
@@ -1538,7 +1537,7 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button onClick={() => handleReply(contextMenu.message)} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
+            <button onClick={() => { handleReply(contextMenu.message); setContextMenu(null); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
               <MessageSquare size={16} /> Ответить
             </button>
             <button onClick={() => { onForward(contextMenu.message); setContextMenu(null); }} className="w-full text-left px-4 py-3 hover:bg-white/5 text-white flex items-center gap-2 transition-colors">
@@ -1573,12 +1572,37 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
           </div>
         )}
 
+        {/* Pending Files UI */}
+        {pendingFiles.length > 0 && (
+          <div className="px-4 py-3 bg-blue-500/5 border-t border-white/10 overflow-x-auto">
+            <div className="flex gap-3 min-w-max">
+              {pendingFiles.map((file) => (
+                <div key={file.id} className="relative group/file bg-white/5 rounded-xl p-2 pr-10 border border-white/10 flex items-center gap-3 animate-in slide-in-from-bottom-2 duration-200">
+                  <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center text-blue-400 flex-shrink-0">
+                    {file.type === 'photo' ? <Image size={20} /> : (file.type === 'video' ? <Video size={20} /> : <FileIcon size={20} />)}
+                  </div>
+                  <div className="min-w-0 max-w-[120px]">
+                    <p className="text-white text-xs font-medium truncate">{file.name}</p>
+                    <p className="text-white/40 text-[10px] uppercase font-bold tracking-wider">{file.type}</p>
+                  </div>
+                  <button
+                    onClick={() => setPendingFiles(prev => prev.filter(f => f.id !== file.id))}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white p-1.5 hover:bg-white/10 rounded-full transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <div className="p-4 bg-black/20 border-t border-white/10">
           <div className="max-w-4xl mx-auto flex gap-3 items-center">
             <label className="text-white/40 hover:text-white transition-colors cursor-pointer">
               <Paperclip size={20} />
-              <input type="file" className="hidden" onChange={handleFileSelect} />
+              <input type="file" className="hidden" onChange={handleFileSelect} multiple />
             </label>
             <input
               className="flex-1 bg-white/5 hover:bg-white/10 focus:bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white outline-none transition-all placeholder:text-white/30"
@@ -1614,15 +1638,22 @@ const ChatArea = ({ activeChat, user, onOpenProfile, onOpenUserIdProfile, onStar
   );
 };
 
-const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, groupParticipants, groupRemoteStreams, activeCallsInGroups, startGroupCall, joinGroupCall, leaveGroupCall, toggleGroupMic, toggleGroupCam, isMicOn, isCamOn, localStream }) => {
+const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, groupParticipants, groupRemoteStreams, activeCallsInGroups, setActiveCallsInGroups, startGroupCall, joinGroupCall, leaveGroupCall, toggleGroupMic, toggleGroupCam, isMicOn, isCamOn, localStream, groupCallParticipantsMap, setGroupCallParticipantsMap, playChime }) => {
+  const processedMsgsRef = useRef(new Set());
   const [activeChat, setActiveChat] = useState(() => {
     try {
       const saved = localStorage.getItem(`samor_active_chat_${user.id}`);
-      return saved ? JSON.parse(saved) : null;
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (parsed && !parsed.name && (!parsed.peer || !parsed.peer.display_name) && parsed.type !== 'channel') {
+        return null;
+      }
+      return parsed;
     } catch (e) {
       return null;
     }
   });
+
+
 
   // Groups State
   const [servers, setServers] = useState([]);
@@ -1631,32 +1662,113 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showCreateChannel, setShowCreateChannel] = useState(null); // group ID
   const [showGroupSettings, setShowGroupSettings] = useState(null); // group ID
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+
 
   // Derived active server
   const activeServer = activeServerId === 'home' ? 'home' : (servers.find(s => s.id === activeServerId) || 'home');
 
   useEffect(() => {
-    if (activeChat) {
+    // Only save if data is COMPLETE (has display_name or is a group/channel)
+    const isGroup = activeChat?.type === 'channel' || activeChat?.group_id;
+    const hasPeerName = activeChat?.peer?.display_name || activeChat?.peer?.username;
+
+    if (activeChat && (isGroup || hasPeerName)) {
       localStorage.setItem(`samor_active_chat_${user.id}`, JSON.stringify(activeChat));
-    } else {
+    } else if (!activeChat) {
       localStorage.removeItem(`samor_active_chat_${user.id}`);
     }
+    // If activeChat exists but is incomplete, don't save (let it be fixed by self-healing)
   }, [activeChat, user.id]);
 
-  const { sendMessage, messages, dialogs, contacts } = useSocket();
+  const { sendMessage, messages, dialogs, contacts, status } = useSocket();
 
-  // Load Groups
+  // Derive current peer data from dialogs/contacts to support self-healing
+  const currentPeer = React.useMemo(() => {
+    if (!activeChat) return null;
+    if (activeChat.type === 'channel' || activeChat.group_id) return null;
+
+    const peerId = activeChat.peer?.id;
+    if (!peerId) return null;
+
+    // Check dialogs (priority)
+    const d = dialogs.find(d => d.peer && d.peer.id == peerId);
+    if (d?.peer?.display_name) return d.peer;
+
+    // Check contacts
+    const c = contacts.find(c => c.id == peerId);
+    if (c?.display_name) return c;
+
+    // Last resort: if we have the peer object but it's just missing status, 
+    // it might have some data like display_name
+    return (activeChat.peer?.display_name) ? activeChat.peer : null;
+  }, [activeChat, dialogs, contacts]);
+
+  // Self-Healing: Repair activeChat from currentPeer if corrupted or stale
   useEffect(() => {
-    sendMessage({ method: 'groups.list' });
-  }, []);
+    if (activeChat?.peer?.id && currentPeer) {
+      const isNameMissing = !activeChat.peer.display_name && currentPeer.display_name;
+      const isStatusStale = activeChat.peer.is_online !== currentPeer.is_online || activeChat.peer.last_seen !== currentPeer.last_seen;
+
+      if (isNameMissing || isStatusStale) {
+        console.log("🚑 Self-Healing ActiveChat Peer:", currentPeer);
+        setActiveChat(prev => {
+          if (!prev || prev.peer?.id !== currentPeer.id) return prev;
+          return {
+            ...prev,
+            peer: {
+              ...prev.peer,
+              ...currentPeer // Merge fresh data
+            }
+          };
+        });
+      }
+    }
+  }, [activeChat?.peer?.id, currentPeer]);
+
+  // Load Initial Data (and reload on reconnect)
+  useEffect(() => {
+    if (status === 'connected') {
+      sendMessage({ method: 'groups.list' });
+      sendMessage({ method: 'dialogs.get' });
+      sendMessage({ method: 'user.list' });
+    }
+  }, [status]);
 
   // Groups Message Handler
+  // Groups Message Handler
   useEffect(() => {
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg) {
+    const newMsgs = messages.filter(m => !processedMsgsRef.current.has(m));
+    if (newMsgs.length === 0) return;
+
+    newMsgs.forEach(lastMsg => {
+      processedMsgsRef.current.add(lastMsg);
+
       if (lastMsg.type === 'groups.list_result') {
         setServers(lastMsg.groups);
         setLoadingGroups(false);
+
+        // Update activeChat if it's a group/channel to sync active_participants
+        if (activeChat?.group_id) {
+          const currentGroup = lastMsg.groups.find(g => g.id === activeChat.group_id);
+          if (currentGroup) {
+            let nextP = [];
+            if (activeChat.type === 'channel') {
+              const ch = currentGroup.channels?.find(c => c.id === activeChat.channel_id);
+              nextP = ch?.active_participants || [];
+            } else {
+              nextP = currentGroup.active_participants || [];
+            }
+
+            const currentP = activeChat.active_participants || [];
+            if (JSON.stringify(currentP) !== JSON.stringify(nextP)) {
+              setActiveChat(prev => ({
+                ...prev,
+                active_participants: nextP
+              }));
+            }
+          }
+        }
       } else if (lastMsg.type === 'groups.create_success') {
         setServers(prev => {
           if (prev.find(s => s.id === lastMsg.group.id)) return prev;
@@ -1690,19 +1802,22 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
       } else if (lastMsg.type === 'groups.deleted') {
         const deletedId = lastMsg.group_id;
         setServers(prev => prev.filter(s => s.id !== deletedId));
+        if (activeServerId === deletedId) setActiveServerId('home');
+        if (activeChat?.group_id === deletedId) setActiveChat(null);
+      } else if (lastMsg.type === 'groups.new_membership') {
+        sendMessage({ method: 'groups.list' });
+      }
+      // user.status is now handled ONLY in SocketContext (updates dialogs).
+      // We don't touch activeChat here to prevent state corruption.
+      // Online indicator works via currentPeer (derived from dialogs).
 
-        if (activeServerId === deletedId) {
-          setActiveServerId('home');
-        }
-
-        if (activeChat?.group_id === deletedId) {
-          setActiveChat(null);
+      if (lastMsg.type === 'user.info') {
+        if (activeChat?.peer?.id == lastMsg.user.id) {
+          setActiveChat(prev => ({ ...prev, peer: lastMsg.user }));
         }
       }
-    } else if (lastMsg.type === 'groups.new_membership') {
-      sendMessage({ method: 'groups.list' });
-    }
-  }, [messages, activeChat]); // Added activeChat to deps for group updates
+    });
+  }, [messages, activeChat]);
 
   // Handle activeChat peer updates (DMs)
   useEffect(() => {
@@ -1723,15 +1838,15 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
   useEffect(() => {
     if (!activeChat || activeChat.type === 'channel') return;
 
+    // 1. Request Info if missing
     if (activeChat.peer?.id && (!activeChat.peer.display_name || !activeChat.peer.username)) {
+      console.log("DEBUG: Requesting user info for", activeChat.peer.id);
       sendMessage({ method: 'user.get_info', args: { user_id: activeChat.peer.id } });
     }
 
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg && lastMsg.type === 'user.info' && lastMsg.user.id == activeChat.peer.id) {
-      setActiveChat(prev => ({ ...prev, peer: lastMsg.user }));
-    }
-  }, [messages, activeChat?.peer?.id]);
+
+
+  }, [activeChat?.peer?.id]);
 
   const [showSettings, setShowSettings] = useState(false);
 
@@ -1746,6 +1861,9 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
   };
 
   const handleChannelSelect = (channel) => {
+    // Find parent group to get active_participants
+    const parentGroup = servers.find(s => s.id === activeServerId);
+
     // Treat channel like a chat object but with special type
     setActiveChat({
       id: `channel_${channel.id}`,
@@ -1754,6 +1872,7 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
       group_id: activeServerId,
       peer: { display_name: channel.name, id: `channel_${channel.id}` }, // Mock peer for header
       name: channel.name,
+      active_participants: parentGroup?.active_participants || [],
       messages: []
     });
   };
@@ -1776,16 +1895,14 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
       messages: []
     };
 
-    if (forwardingMessage) {
-      setForwardingMessage(null);
-    } else {
-      setActiveChat(targetDialog);
-    }
+    setActiveChat(targetDialog);
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden glass-panel max-w-[1600px] mx-auto border-x border-white/10 shadow-2xl relative">
+    <div className="flex h-screen w-full overflow-hidden glass-panel md:max-w-[1600px] mx-auto border-0 md:border md:border-white/10 shadow-2xl relative">
       {showSettings && <Settings user={user} onClose={() => setShowSettings(false)} />}
+      {showAdminPanel && <AdminPanel onClose={() => setShowAdminPanel(false)} />}
+
       {showCreateGroup && <CreateGroupModal onClose={() => setShowCreateGroup(false)} onCreate={(data) => sendMessage({ method: 'groups.create', args: data })} />}
       {showCreateChannel && <CreateChannelModal
         group={showCreateChannel}
@@ -1845,9 +1962,18 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
         activeChat={activeChat}
         setActiveChat={handleContactSelect}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenAdminPanel={() => setShowAdminPanel(true)}
+
         servers={servers}
+        setServers={setServers}
         onSelectGroup={(server) => {
+          // Reset unread count locally when selecting a group
+          setServers(prev => prev.map(s => s.id === server.id ? { ...s, unread_count: 0 } : s));
+
           const mainChannel = server.channels?.find(c => c.type === 'text') || server.channels?.[0];
+
+
+
           if (mainChannel) {
             setActiveChat({
               id: `channel_${mainChannel.id}`,
@@ -1867,6 +1993,7 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
         }}
         onCreateGroup={() => setShowCreateGroup(true)}
         activeCallsInGroups={activeCallsInGroups}
+        playChime={playChime}
       />
 
       <ChatArea
@@ -1881,11 +2008,44 @@ const MainLayout = ({ user, onStartCall, groupCallActive, activeGroupCall, group
         onStartGroupCall={startGroupCall}
         onJoinGroupCall={joinGroupCall}
         activeCallsInGroups={activeCallsInGroups}
+        groupCallParticipantsMap={groupCallParticipantsMap}
+        groupCallActive={groupCallActive}
         onForward={(msg) => setForwardingMessage(msg)}
         onOpenForwardedChat={(targetDialog) => setActiveChat(targetDialog)}
         onSelectChannel={handleChannelSelect}
         onCreateChannel={(gid) => setShowCreateChannel(gid)}
+        onBack={() => setActiveChat(null)}
       />
+      {forwardingMessage && (
+        <ForwardModal
+          onClose={() => setForwardingMessage(null)}
+          dialogs={dialogs}
+          servers={servers}
+          contacts={contacts}
+          onForward={(target) => {
+            if (target.type === 'peer') {
+              sendMessage({
+                method: 'messages.forward',
+                args: {
+                  message_ids: [forwardingMessage.id],
+                  peer_id: target.id
+                }
+              });
+            } else if (target.type === 'group') {
+              const mainChannel = target.server.channels?.find(c => c.type === 'text') || target.server.channels?.[0];
+              if (mainChannel) {
+                sendMessage({
+                  method: 'messages.forward',
+                  args: {
+                    message_ids: [forwardingMessage.id],
+                    channel_id: mainChannel.id
+                  }
+                });
+              }
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -1916,10 +2076,12 @@ const AppContent = () => {
   const [isCamOn, setIsCamOn] = useState(true);
   const groupPeerConnections = useRef({}); // {userId: pc }
   const [activeCallsInGroups, setActiveCallsInGroups] = useState({}); // {groupId: true }
+  const [groupCallParticipantsMap, setGroupCallParticipantsMap] = useState({}); // { groupId: [participants] }
 
   // Ringtone (Blob-based for background playback)
   const ringtoneAudioRef = useRef(null);
   const chimeAudioRef = useRef(null);
+  const processedMsgsRef = useRef(new Set()); // Restore Ref to AppContent scope
 
   useEffect(() => {
     // Generate simple sine wave WAV blob
@@ -2276,7 +2438,7 @@ const AppContent = () => {
   const startGroupCall = async (group) => {
     setActiveGroupCall(group);
     setGroupCallActive(true);
-    sendMessage({ method: 'groups.call.start', args: { group_id: group.id } });
+    sendMessage({ method: 'groups.call.start', args: { group_id: group.channel_id || group.id } });
 
     // Auto join after starting
     joinGroupCall(group);
@@ -2292,7 +2454,7 @@ const AppContent = () => {
       localStreamRef.current = stream;
       setIsCamOn(true);
       setIsMicOn(true);
-      sendMessage({ method: 'groups.call.join', args: { group_id: group.id } });
+      sendMessage({ method: 'groups.call.join', args: { group_id: group.channel_id || group.id } });
     } catch (err) {
       console.error("Error joining group call:", err);
       alert("Could not access camera/mic");
@@ -2304,8 +2466,8 @@ const AppContent = () => {
     console.log("DEBUG: leaveGroupCall called");
     console.log("DEBUG: activeGroupCall:", activeGroupCall);
     if (activeGroupCall) {
-      console.log("DEBUG: Sending groups.call.leave message for group", activeGroupCall.id);
-      sendMessage({ method: 'groups.call.leave', args: { group_id: activeGroupCall.id } });
+      console.log("DEBUG: Sending groups.call.leave message for group", activeGroupCall.channel_id || activeGroupCall.id);
+      sendMessage({ method: 'groups.call.leave', args: { group_id: activeGroupCall.channel_id || activeGroupCall.id } });
     }
 
     console.log("DEBUG: Immediately closing modal and cleaning up");
@@ -2426,11 +2588,30 @@ const AppContent = () => {
       } else if (msg.type === 'groups.list_result') {
         const activeCalls = {};
         msg.groups.forEach(g => {
-          if (g.has_active_call) activeCalls[g.id] = true;
+          if (g.has_active_call) {
+            activeCalls[g.id] = {
+              participants: g.active_participants || [],
+              started_by: g.call_started_by || (g.active_participants?.[0]?.id)
+            };
+          }
+          if (g.channels) {
+            g.channels.forEach(ch => {
+              if (ch.has_active_call) {
+                activeCalls[ch.id] = {
+                  participants: ch.active_participants || [],
+                  started_by: ch.call_started_by
+                };
+              }
+            });
+          }
         });
         setActiveCallsInGroups(activeCalls);
       } else if (msg.type === 'groups.call.started') {
-        setActiveCallsInGroups(prev => ({ ...prev, [msg.group_id]: true }));
+        console.log("📞 Call started in group:", msg.group_id, "by user:", msg.started_by);
+        setActiveCallsInGroups(prev => ({
+          ...prev,
+          [msg.group_id]: { participants: [], started_by: msg.started_by }
+        }));
         if (msg.started_by !== user.id) {
           playChime();
           if (Notification.permission === "granted") {
@@ -2441,56 +2622,95 @@ const AppContent = () => {
           }
         }
       } else if (msg.type === 'groups.call.ended') {
+        console.log("📵 Call ended in group:", msg.group_id);
         setActiveCallsInGroups(prev => {
           const next = { ...prev };
           delete next[msg.group_id];
           return next;
         });
+        // Clear participants map for this group
+        setGroupCallParticipantsMap(prev => {
+          const next = { ...prev };
+          delete next[msg.group_id];
+          return next;
+        });
       } else if (msg.type === 'groups.call.member_joined') {
+        console.log("🔵 Member joined event:", msg);
         setGroupParticipants(prev => {
           if (prev.find(p => p.id === msg.user.id)) return prev;
           return [...prev, msg.user];
         });
+
+        // Update groupCallParticipantsMap
+        setGroupCallParticipantsMap(prev => {
+          const current = prev[msg.group_id] || [];
+          console.log(`Current participants for group ${msg.group_id}:`, current);
+          if (current.find(p => p.id === msg.user.id)) {
+            console.log("User already in map, skipping");
+            return prev;
+          }
+          const updated = { ...prev, [msg.group_id]: [...current, msg.user] };
+          console.log("✅ Updated groupCallParticipantsMap:", updated);
+          return updated;
+        });
       } else if (msg.type === 'groups.call.member_left') {
         console.log("DEBUG: Received groups.call.member_left", msg);
-        console.log("DEBUG: Current user ID:", user.id);
-        console.log("DEBUG: Leaving user ID:", msg.user_id);
-        console.log("DEBUG: Current groupCallActive:", groupCallActive);
+        const { group_id, user_id } = msg;
 
-        // Check if the leaving user is the current user
+        // Update activeCallsInGroups (the banner state)
+        setActiveCallsInGroups(prev => {
+          const call = prev[group_id];
+          if (!call || typeof call !== 'object' || !Array.isArray(call.participants)) return prev;
+          const updated = call.participants.filter(p => p.id !== user_id);
+          if (updated.length === 0) {
+            const next = { ...prev };
+            delete next[group_id];
+            return next;
+          }
+          return { ...prev, [group_id]: { ...call, participants: updated } };
+        });
+
+        // Update current participants list if user is in this call
         if (msg.user_id === user.id) {
-          console.log("DEBUG: Current user is leaving");
-          // Current user left - only cleanup if we haven't already
-          // (leaveGroupCall already did the cleanup)
           if (groupCallActive) {
-            console.log("DEBUG: Cleaning up for current user");
             setGroupCallActive(false);
             setActiveGroupCall(null);
             cleanupCall();
-          } else {
-            console.log("DEBUG: Already cleaned up, skipping");
           }
         } else {
-          console.log("DEBUG: Another user is leaving, removing from participants");
-          // Another user left - remove from participants
-          setGroupParticipants(prev => {
-            console.log("DEBUG: Current participants before filter:", prev);
-            const filtered = prev.filter(p => p.id !== msg.user_id);
-            console.log("DEBUG: Participants after filter:", filtered);
-            return filtered;
-          });
+          setGroupParticipants(prev => prev.filter(p => p.id !== user_id));
           setGroupRemoteStreams(prev => {
             const next = { ...prev };
-            delete next[msg.user_id];
+            delete next[user_id];
             return next;
           });
-          if (groupPeerConnections.current[msg.user_id]) {
-            groupPeerConnections.current[msg.user_id].close();
-            delete groupPeerConnections.current[msg.user_id];
+          if (groupPeerConnections.current[user_id]) {
+            groupPeerConnections.current[user_id].close();
+            delete groupPeerConnections.current[user_id];
           }
+
+          // Also update the map
+          setGroupCallParticipantsMap(prev => {
+            const current = prev[group_id] || [];
+            const filtered = current.filter(p => p.id !== user_id);
+            if (filtered.length === 0) {
+              const next = { ...prev };
+              delete next[group_id];
+              return next;
+            }
+            return { ...prev, [group_id]: filtered };
+          });
         }
       } else if (msg.type === 'groups.call.join_result') {
+        console.log("🟢 Join result:", msg);
         setGroupParticipants(msg.participants);
+        setGroupCallActive(true);
+        setActiveGroupCall({ id: msg.group_id, name: 'Group Call' });
+
+        // Refresh groups list to get updated participant info
+        console.log("Refreshing groups list after joining call...");
+        sendMessage({ method: 'groups.list' });
+
         (async () => {
           for (const p of msg.participants) {
             const pc = await createGroupPeerConnection(p.id, msg.group_id);
@@ -2544,6 +2764,7 @@ const AppContent = () => {
           groupParticipants={groupParticipants}
           groupRemoteStreams={groupRemoteStreams}
           activeCallsInGroups={activeCallsInGroups}
+          setActiveCallsInGroups={setActiveCallsInGroups}
           startGroupCall={startGroupCall}
           joinGroupCall={joinGroupCall}
           leaveGroupCall={leaveGroupCall}
@@ -2552,6 +2773,9 @@ const AppContent = () => {
           isMicOn={isMicOn}
           isCamOn={isCamOn}
           localStream={localStream}
+          groupCallParticipantsMap={groupCallParticipantsMap}
+          setGroupCallParticipantsMap={setGroupCallParticipantsMap}
+          playChime={playChime}
         />
         <CallModal
           callStatus={callStatus}

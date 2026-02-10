@@ -7,7 +7,7 @@ import uuid
 import random
 import re
 from app.core.email import send_email
-from app.db.models import AsyncSessionLocal, User, Message, Dialog, Contact, Group, GroupMember, Channel
+from app.db.models import AsyncSessionLocal, User, Message, Dialog, Contact, Group, GroupMember, Channel, BannedEmail
 from sqlalchemy.future import select
 from sqlalchemy import update, delete, or_, and_
 
@@ -19,23 +19,27 @@ active_p2p_calls = {}
 
 async def broadcast_presence(user_id: int, is_online: bool, last_seen: float = 0):
     async with AsyncSessionLocal() as db:
-        # Get all users who have this user as a contact (or just active dialog peers for MVP)
-        # For full "online status", you usually only show it to people you have chatted with or are contacts.
-        # Let's broadcast to everyone with an active session for simplicity (Small scale) 
-        # OR better: broadcast to all open sessions.
+        # Fetch user details to send full object (prevents "Unknown" on client)
+        res = await db.execute(select(User).where(User.id == user_id))
+        user = res.scalars().first()
         
-        # Proper way: Broadcast to sessions where `user_id` is a known peer. 
-        # Optimization: Client filters. Server broadcasts to all? 
-        # Privacy: Let's broadcast to all active sessions for now.
-        
+        user_data = None
+        if user:
+            # Manually set attributes for serialization context if needed, or just serialize
+            # We want to force the status we are broadcasting
+            user_data = serialize_user(user, include_status=False) # Status is top-level
+            user_data["is_online"] = is_online
+            user_data["last_seen"] = last_seen
+
         payload = {
             "type": "user.status",
             "user_id": user_id,
             "status": "online" if is_online else "offline",
-            "last_seen": last_seen
+            "last_seen": last_seen,
+            # "user": user_data  <-- REMOVED to prevent overwriting client data with potential "Unknowns"
         }
         
-        for sid, sess in session_manager.sessions.items():
+        for sid, sess in list(session_manager.sessions.items()):
             if sess.user_id and sess.websocket: # Active authenticated session
                 try:
                     # Encrypt and send
@@ -49,7 +53,7 @@ async def broadcast_presence(user_id: int, is_online: bool, last_seen: float = 0
 async def broadcast_event(user_id: int, event_type: str, data: dict):
     # Helper to send event to all sessions of a user
     to_remove = []
-    for sid, sess in session_manager.sessions.items():
+    for sid, sess in list(session_manager.sessions.items()):
         if sess.user_id == user_id:
             if sess.websocket:
                 try:
@@ -70,6 +74,32 @@ async def broadcast_event(user_id: int, event_type: str, data: dict):
 
     for sid in to_remove:
         session_manager.remove_session(sid)
+
+def serialize_user(user, include_status=True):
+    if not user: return None
+    
+    display_name = getattr(user, 'display_name', None)
+    username = getattr(user, 'username', None)
+    uid = getattr(user, 'id', 0)
+    
+    if not display_name or display_name.strip() == "":
+        display_name = username or f"User {uid}"
+        
+    data = {
+        "id": uid,
+        "username": username or f"user{uid}",
+        "display_name": display_name,
+        "avatar_url": getattr(user, 'avatar_url', None),
+        "about": getattr(user, 'about', "") or "",
+        "phone_number": getattr(user, 'phone_number', None),
+        "email": getattr(user, 'email', None)
+    }
+    
+    if include_status:
+        data["is_online"] = session_manager.is_online(uid)
+        data["last_seen"] = getattr(user, 'last_seen', None)
+        
+    return data
 
 @router.websocket("/ws/connect")
 async def websocket_endpoint(websocket: WebSocket):
@@ -128,6 +158,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 response_data = {}
                 
+                delete_for_all = False
                 if method == "echo":
                     response_data = {"type": "response", "data": f"Echo: {args.get('text')}"}
                     
@@ -147,6 +178,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 error_message = "User with this email already exists"
                             elif req_type == "login" and not existing_user:
                                 error_message = "User not found"
+                            
+                            # Check if email is banned
+                            if not error_message:
+                                res_banned = await db.execute(select(BannedEmail).where(BannedEmail.email == email))
+                                if res_banned.scalars().first():
+                                    error_message = "This account has been suspended"
                         
                         if error_message:
                             response_data = {"type": "error", "message": error_message}
@@ -205,16 +242,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                     session.temp_auth_data = {}
                                     response_data = {
                                         "type": "auth_success",
-                                        "user": {
-                                            "id": user.id,
-                                            "username": user.username,
-                                            "display_name": user.display_name,
-                                            "avatar_url": user.avatar_url,
-                                            "about": user.about,
-                                            "phone_number": user.phone_number,
-                                            "token": token
-                                        }
+                                        "user": serialize_user(user)
                                     }
+                                    response_data["user"]["token"] = token
                                 else:
                                     response_data = {"type": "error", "message": "User not found"}
                                     
@@ -247,16 +277,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                     await broadcast_presence(user.id, True)
                                     response_data = {
                                         "type": "auth_success",
-                                        "user": {
-                                            "id": user.id,
-                                            "username": user.username,
-                                            "display_name": user.display_name,
-                                            "avatar_url": user.avatar_url,
-                                            "about": user.about,
-                                            "phone_number": user.phone_number,
-                                            "token": token
-                                        }
+                                        "user": serialize_user(user)
                                     }
+                                    response_data["user"]["token"] = token
                                 else:
                                     response_data = {"type": "error", "message": "Invalid email or password"}
 
@@ -308,16 +331,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                     
                                     response_data = {
                                         "type": "auth_success",
-                                        "user": {
-                                            "id": new_user.id,
-                                            "username": new_user.username,
-                                            "display_name": new_user.display_name,
-                                            "avatar_url": new_user.avatar_url,
-                                            "about": new_user.about,
-                                            "phone_number": new_user.phone_number,
-                                            "token": login_token
-                                        }
+                                        "user": serialize_user(new_user)
                                     }
+                                    response_data["user"]["token"] = login_token
                 
                 elif method == "auth.login_token":
                     token = args.get("token")
@@ -334,16 +350,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 
                                 response_data = {
                                     "type": "auth_success",
-                                    "user": {
-                                        "id": user.id,
-                                        "username": user.username,
-                                        "display_name": user.display_name,
-                                        "avatar_url": user.avatar_url,
-                                        "about": user.about,
-                                        "phone_number": user.phone_number,
-                                        "token": user.token
-                                    }
+                                    "user": serialize_user(user)
                                 }
+                                response_data["user"]["token"] = user.token
                             else:
                                 response_data = {"type": "error", "message": "Invalid token"}
 
@@ -360,12 +369,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             if user:
                                 response_data = {
                                     "type": "search_result",
-                                    "user": {
-                                        "id": user.id,
-                                        "username": user.username,
-                                        "display_name": user.display_name,
-                                        "avatar_url": user.avatar_url
-                                    }
+                                    "user": serialize_user(user, include_status=False)
                                 }
                             else:
                                  response_data = {"type": "error", "message": "User not found"}
@@ -382,16 +386,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             if user:
                                 response_data = {
                                     "type": "user.info",
-                                    "user": {
-                                        "id": user.id,
-                                        "username": user.username,
-                                        "display_name": user.display_name,
-                                        "avatar_url": user.avatar_url,
-                                        "about": user.about,
-                                        "phone_number": user.phone_number,
-                                        "is_online": session_manager.is_online(user.id),
-                                        "last_seen": user.last_seen
-                                    }
+                                    "user": serialize_user(user)
                                 }
                             else:
                                 response_data = {"type": "error", "message": "User not found"}
@@ -406,14 +401,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         user_list = []
                         for u in users:
                             if u.id == session.user_id: continue
-                            user_list.append({
-                                "id": u.id,
-                                "username": u.username,
-                                "display_name": u.display_name,
-                                "avatar_url": u.avatar_url,
-                                "is_online": session_manager.is_online(u.id),
-                                "last_seen": u.last_seen
-                            })
+                            user_list.append(serialize_user(u))
                             
                         response_data = {"type": "user.list_result", "users": user_list}
 
@@ -427,6 +415,22 @@ async def websocket_endpoint(websocket: WebSocket):
                             db.add(new_contact)
                             await db.commit()
                             response_data = {"type": "success", "message": "Contact added"}
+
+                elif method == "user.get_info":
+                    raw_id = args.get("user_id")
+                    target_id = int(raw_id) if raw_id is not None and str(raw_id).isdigit() else None
+                    if not session.user_id:
+                        response_data = {"type": "error", "message": "Not authenticated"}
+                    elif not target_id:
+                        response_data = {"type": "error", "message": "User ID required"}
+                    else:
+                        async with AsyncSessionLocal() as db:
+                            res = await db.execute(select(User).where(User.id == target_id))
+                            user_obj = res.scalars().first()
+                            if user_obj:
+                                response_data = {"type": "user.info", "user": serialize_user(user_obj)}
+                            else:
+                                response_data = {"type": "error", "message": "User not found"}
 
                 elif method == "dialogs.get":
                     if not session.user_id:
@@ -450,17 +454,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                         msg_content = msg.content if msg.msg_type == "text" else f"[{msg.msg_type}]"
                                 
                                 if peer:
-                                    is_online = session_manager.is_online(peer.id)
                                     dialog_list.append({
                                         "id": d.id,
-                                        "peer": {
-                                            "id": peer.id,
-                                            "username": peer.username,
-                                            "display_name": peer.display_name,
-                                            "avatar_url": peer.avatar_url,
-                                            "is_online": is_online,
-                                            "last_seen": peer.last_seen
-                                        },
+                                        "peer": serialize_user(peer),
                                         "last_message": msg_content,
                                         "unread_count": d.unread_count,
                                         "updated_at": d.updated_at
@@ -510,6 +506,24 @@ async def websocket_endpoint(websocket: WebSocket):
                                     if m.sender_id == session.user_id and m.deleted_by_sender: continue
                                     if m.recipient_id == session.user_id and m.deleted_by_recipient: continue
                                     
+                                    fwd_from_id = m.fwd_from_id
+                                    fwd_from_user = None
+                                    if fwd_from_id:
+                                        if fwd_from_id in sender_map:
+                                            fwd_from_user = sender_map[fwd_from_id]
+                                        else:
+                                            # Fetch if not in map (rare case if not already a sender in this batch)
+                                            f_res = await db.execute(select(User).where(User.id == fwd_from_id))
+                                            f_user = f_res.scalars().first()
+                                            if f_user:
+                                                fwd_from_user = {
+                                                    "id": f_user.id,
+                                                    "display_name": f_user.display_name,
+                                                    "username": f_user.username,
+                                                    "avatar_url": f_user.avatar_url
+                                                }
+                                                sender_map[f_user.id] = fwd_from_user
+
                                     msgs_out.append({
                                         "id": m.id,
                                         "sender_id": m.sender_id,
@@ -520,7 +534,8 @@ async def websocket_endpoint(websocket: WebSocket):
                                         "is_read": m.is_read,
                                         "created_at": m.created_at,
                                         "reply_to_msg_id": m.reply_to_msg_id,
-                                        "fwd_from_id": m.fwd_from_id
+                                        "fwd_from_id": m.fwd_from_id,
+                                        "fwd_from_user": fwd_from_user
                                     })
                                     
                                 response_data = {"type": "messages.history", "messages": msgs_out, "peer_id": peer_id}
@@ -601,6 +616,23 @@ async def websocket_endpoint(websocket: WebSocket):
                                         if m.sender_id == session.user_id and m.deleted_by_sender: continue
                                         if m.recipient_id == session.user_id and m.deleted_by_recipient: continue
                                         
+                                        fwd_from_id = m.fwd_from_id
+                                        fwd_from_user = None
+                                        if fwd_from_id:
+                                            if fwd_from_id in sender_map:
+                                                fwd_from_user = sender_map[fwd_from_id]
+                                            else:
+                                                f_res = await db.execute(select(User).where(User.id == fwd_from_id))
+                                                f_user = f_res.scalars().first()
+                                                if f_user:
+                                                    fwd_from_user = {
+                                                        "id": f_user.id,
+                                                        "display_name": f_user.display_name,
+                                                        "username": f_user.username,
+                                                        "avatar_url": f_user.avatar_url
+                                                    }
+                                                    sender_map[f_user.id] = fwd_from_user
+
                                         msgs_out.append({
                                             "id": m.id,
                                             "sender_id": m.sender_id,
@@ -608,7 +640,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                             "content": m.content,
                                             "type": m.msg_type,
                                             "media_url": m.media_url,
-                                            "created_at": m.created_at
+                                            "created_at": m.created_at,
+                                            "fwd_from_id": m.fwd_from_id,
+                                            "fwd_from_user": fwd_from_user
                                         })
                                     
                                     response_data = {"type": "messages.search_result", "messages": msgs_out, "filter": filter_type}
@@ -666,90 +700,124 @@ async def websocket_endpoint(websocket: WebSocket):
                             response_data = {"type": "messages.deleted", "ids": deleted_ids}
 
                 elif method == "messages.forward":
-                    msg_ids = args.get("message_ids", [])
-                    peer_id = args.get("peer_id")
+                    raw_msg_ids = args.get("message_ids", [])
+                    msg_ids = [int(mid) for mid in raw_msg_ids if str(mid).isdigit()]
+                    raw_peer_id = args.get("peer_id")
+                    peer_id = int(raw_peer_id) if raw_peer_id is not None and str(raw_peer_id).isdigit() else None
+                    raw_channel_id = args.get("channel_id")
+                    channel_id = int(raw_channel_id) if raw_channel_id is not None and str(raw_channel_id).isdigit() else None
                     
                     if not session.user_id:
                         response_data = {"type": "error", "message": "Not authenticated"}
-                    elif not peer_id:
-                        response_data = {"type": "error", "message": "Peer required"}
+                    elif not peer_id and not channel_id:
+                        response_data = {"type": "error", "message": "Recipient or Channel required"}
                     else:
-                        async with AsyncSessionLocal() as db:
-                            # Fetch originals
-                            stmt = select(Message).where(Message.id.in_(msg_ids))
-                            res = await db.execute(stmt)
-                            originals = res.scalars().all()
-                            
-                            # Sort by original creation? Or just order in list. 
-                            # Let's preserve order from request or ID.
-                            
-                            fwd_messages = []
-                            
-                            for orig in originals:
-                                # Create new message
-                                new_msg = Message(
-                                    sender_id=session.user_id,
-                                    recipient_id=peer_id,
-                                    content=orig.content,
-                                    msg_type=orig.msg_type,
-                                    media_url=orig.media_url,
-                                    created_at=time.time(),
-                                    fwd_from_id=orig.fwd_from_id or orig.sender_id # Chain forwarding or Original
-                                )
-                                db.add(new_msg)
-                                await db.flush() # to get ID
+                        try:
+                            async with AsyncSessionLocal() as db:
+                                # Fetch originals
+                                stmt = select(Message).where(Message.id.in_(msg_ids))
+                                res = await db.execute(stmt)
+                                originals = res.scalars().all()
                                 
-                                # Update Dialogs (Optimized: do it once per batch maybe? but loop is fine for MVP)
-                                # ... existing dialog update logic ...
-                                # (Skipping duplicated dialog logic for brevity, assume standardized helper in real app)
-                                # Let's just do minimal dialog update here or copy-paste
+                                fwd_messages = []
                                 
-                                # Sender Dialog
-                                res = await db.execute(select(Dialog).where(and_(Dialog.user_id==session.user_id, Dialog.peer_id==peer_id)))
-                                d_sender = res.scalars().first()
-                                if not d_sender:
-                                    d_sender = Dialog(user_id=session.user_id, peer_id=peer_id, unread_count=0)
-                                    db.add(d_sender)
-                                d_sender.last_message_id = new_msg.id
-                                d_sender.updated_at = time.time()
+                                for orig in originals:
+                                    # Create new message
+                                    new_msg = Message(
+                                        sender_id=session.user_id,
+                                        recipient_id=peer_id,
+                                        channel_id=channel_id,
+                                        content=orig.content,
+                                        msg_type=orig.msg_type,
+                                        media_url=orig.media_url,
+                                        created_at=time.time(),
+                                        fwd_from_id=orig.fwd_from_id or orig.sender_id
+                                    )
+                                    db.add(new_msg)
+                                    await db.flush() # to get ID
+                                    
+                                    if not channel_id:
+                                        # Update Dialogs for DMs
+                                        # Sender Dialog
+                                        res = await db.execute(select(Dialog).where(and_(Dialog.user_id==session.user_id, Dialog.peer_id==peer_id)))
+                                        d_sender = res.scalars().first()
+                                        if not d_sender:
+                                            d_sender = Dialog(user_id=session.user_id, peer_id=peer_id, unread_count=0)
+                                            db.add(d_sender)
+                                        d_sender.last_message_id = new_msg.id
+                                        d_sender.updated_at = time.time()
+                                        
+                                        # Recipient Dialog
+                                        res = await db.execute(select(Dialog).where(and_(Dialog.user_id==peer_id, Dialog.peer_id==session.user_id)))
+                                        d_recipient = res.scalars().first()
+                                        if not d_recipient:
+                                            d_recipient = Dialog(user_id=peer_id, peer_id=session.user_id, unread_count=0)
+                                            db.add(d_recipient)
+                                        d_recipient.last_message_id = new_msg.id
+                                        d_recipient.updated_at = time.time()
+                                        d_recipient.unread_count += 1
+                                    
+                                    fwd_messages.append(new_msg)
                                 
-                                # Recipient Dialog
-                                res = await db.execute(select(Dialog).where(and_(Dialog.user_id==peer_id, Dialog.peer_id==session.user_id)))
-                                d_recipient = res.scalars().first()
-                                if not d_recipient:
-                                    d_recipient = Dialog(user_id=peer_id, peer_id=session.user_id, unread_count=0)
-                                    db.add(d_recipient)
-                                d_recipient.last_message_id = new_msg.id
-                                d_recipient.updated_at = time.time()
-                                d_recipient.unread_count += 1
+                                await db.commit()
                                 
-                                fwd_messages.append(new_msg)
-                            
-                            await db.commit()
-                            
-                            # Construct response objects
-                            msgs_out = []
-                            for m in fwd_messages:
-                                msg_obj = {
-                                    "id": m.id,
-                                    "sender_id": session.user_id,
-                                    "content": m.content,
-                                    "type": m.msg_type,
-                                    "media_url": m.media_url,
-                                    "is_read": False,
-                                    "created_at": m.created_at,
-                                    "fwd_from_id": m.fwd_from_id
-                                }
-                                msgs_out.append(msg_obj)
+                                # Broadcast and Response
+                                msgs_out = []
+                                for m in fwd_messages:
+                                    # Resolve original sender info for the first time
+                                    fwd_from_user = None
+                                    if m.fwd_from_id:
+                                        f_res = await db.execute(select(User).where(User.id == m.fwd_from_id))
+                                        f_u = f_res.scalars().first()
+                                        if f_u:
+                                            fwd_from_user = {
+                                                "id": f_u.id, 
+                                                "display_name": f_u.display_name,
+                                                "username": f_u.username,
+                                                "avatar_url": f_u.avatar_url
+                                            }
+
+                                    msg_obj = {
+                                        "id": m.id,
+                                        "sender_id": session.user_id,
+                                        "content": m.content,
+                                        "type": m.msg_type,
+                                        "media_url": m.media_url,
+                                        "is_read": False,
+                                        "created_at": m.created_at,
+                                        "fwd_from_id": m.fwd_from_id,
+                                        "fwd_from_user": fwd_from_user
+                                    }
+                                    if m.channel_id: msg_obj["channel_id"] = m.channel_id
+                                    msgs_out.append(msg_obj)
+                                    
+                                    if not m.channel_id:
+                                        # DM Broadcast
+                                        await broadcast_event(peer_id, "message.new", {
+                                            "message": msg_obj,
+                                            "peer_id": session.user_id,
+                                            "sender_id": session.user_id
+                                        })
+                                    else:
+                                        # Channel Broadcast
+                                        res = await db.execute(select(Channel).where(Channel.id == m.channel_id))
+                                        channel = res.scalars().first()
+                                        if channel:
+                                            res = await db.execute(select(GroupMember).where(GroupMember.group_id == channel.group_id))
+                                            members = res.scalars().all()
+                                            member_ids = [mem.user_id for mem in members]
+                                            for mid in member_ids:
+                                                if mid != session.user_id:
+                                                    await broadcast_event(mid, "message.new", {
+                                                        "message": msg_obj,
+                                                        "channel_id": m.channel_id,
+                                                        "sender_id": session.user_id
+                                                    })
                                 
-                                # Notify Recipient
-                                await broadcast_event(peer_id, "message.new", {
-                                    "message": msg_obj,
-                                    "peer_id": session.user_id,
-                                    "sender_id": session.user_id
-                                })
-                            
-                            response_data = {"type": "messages.forward_done", "count": len(msgs_out)}
+                                response_data = {"type": "messages.forward_done", "count": len(msgs_out)}
+                        except Exception as e:
+                            print(f"Forward error: {e}")
+                            response_data = {"type": "error", "message": "Forward failed"}
 
                 elif method == "messages.read":
                     peer_id = args.get("peer_id")
@@ -787,7 +855,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             response_data = {"type": "messages.read_done", "peer_id": peer_id}
                             
                             # 3. Broadcast to Peer (Sender) that I read their messages
-                            for sid, sess in session_manager.sessions.items():
+                            for sid, sess in list(session_manager.sessions.items()):
                                 if sess.user_id == peer_id and sess.websocket:
                                     try:
                                         push_wrapper = {
@@ -840,12 +908,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             
                             res = await db.execute(select(User).where(User.id == session.user_id))
                             me = res.scalars().first()
-                            sender_info = {
-                                "id": me.id,
-                                "display_name": me.display_name,
-                                "username": me.username,
-                                "avatar_url": me.avatar_url
-                            }
+                            sender_info = serialize_user(me, include_status=False)
                             
                             msg_obj = {
                                 "sender": sender_info,
@@ -1037,10 +1100,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     delete_for_all = args.get("delete_for_all", False)
                     
                     if not message_ids:
-                        response_data = {"type": "error", "message": "No message IDs provided"}
+                        response_data = {"type": "error", "message": "No IDs provided"}
+                    elif not session.user_id:
+                        response_data = {"type": "error", "message": "Not authenticated"}
                     else:
                         async with AsyncSessionLocal() as db:
-                            # Fetch messages to verify ownership
                             res = await db.execute(select(Message).where(Message.id.in_(message_ids)))
                             msgs = res.scalars().all()
                             
@@ -1050,23 +1114,166 @@ async def websocket_endpoint(websocket: WebSocket):
                                 is_recipient = msg.recipient_id == session.user_id
                                 
                                 if not (is_sender or is_recipient):
-                                    continue # Should not happen unless malicious
-                                
+                                    continue
+                                    
                                 if delete_for_all and is_sender:
-                                    # Hard delete or global flag
                                     await db.delete(msg)
                                     deleted_ids.append(msg.id)
                                 else:
-                                    # Soft delete for me
                                     if is_sender:
                                         msg.deleted_by_sender = True
-                                    elif is_recipient:
+                                    if is_recipient:
                                         msg.deleted_by_recipient = True
                                     deleted_ids.append(msg.id)
                             
                             await db.commit()
-                            
                             response_data = {"type": "messages.deleted", "ids": deleted_ids}
+
+                # --- ADMIN METHODS (Strictly for gtesla814@gmail.com) ---
+                elif method.startswith("admin."):
+                    print(f"DEBUG: Processing admin method '{method}' for user_id={session.user_id}")
+                    if not session.user_id:
+                        print("DEBUG: User not authenticated")
+                        response_data = {"type": "error", "message": "Not authenticated"}
+                    else:
+                        async with AsyncSessionLocal() as db:
+                            res = await db.execute(select(User).where(User.id == session.user_id))
+                            me = res.scalars().first()
+                            
+                            debug_email = me.email if me else "None"
+                            print(f"DEBUG: Authenticated user email is: '{debug_email}'")
+                            
+                            # Case-insensitive and whitespace-tolerant check
+                            target_email = "gtesla814@gmail.com"
+                            user_email = (me.email or "").strip().lower()
+                            
+                            if user_email != target_email:
+                                print(f"DEBUG: Access denied. Expected '{target_email}', got '{user_email}'")
+                                response_data = {"type": "error", "message": f"Admin access denied: Email '{user_email}' is not authorized."}
+                            else:
+                                print("DEBUG: Access granted. Executing admin logic.")
+                                try:
+                                    if method == "admin.users_get":
+                                        print("ADMIN: Fetching users (LIMIT 50)...")
+                                        res = await db.execute(select(User).order_by(User.id.desc()).limit(50))
+                                        users = res.scalars().all()
+                                        print(f"ADMIN: Found {len(users)} users. Serializing...")
+                                        
+                                        serialized_users = []
+                                        for u in users:
+                                            try:
+                                                s_u = serialize_user(u)
+                                                serialized_users.append(s_u)
+                                            except Exception as ser_err:
+                                                print(f"ADMIN ERROR: Failed to serialize user {u.id}: {ser_err}")
+                                        
+                                        print(f"ADMIN: Serialized {len(serialized_users)} users successfully.")
+                                        response_data = {"type": "admin.users_list", "users": serialized_users}
+                                    
+                                    elif method == "admin.groups_get":
+                                        print("ADMIN: Fetching groups...")
+                                        res = await db.execute(select(Group).order_by(Group.id.desc()))
+                                        groups = res.scalars().all()
+                                        print(f"ADMIN: Found {len(groups)} groups")
+                                        response_data = {"type": "admin.groups_list", "groups": [{
+                                            "id": g.id,
+                                            "name": g.name,
+                                            "avatar_url": g.avatar_url,
+                                            "owner_id": g.owner_id,
+                                            "created_at": g.created_at
+                                        } for g in groups]}
+                                    
+                                    elif method == "admin.user_ban":
+                                        target_user_id = args.get("user_id")
+                                        print(f"ADMIN: Banning user {target_user_id}")
+                                        res = await db.execute(select(User).where(User.id == target_user_id))
+                                        target = res.scalars().first()
+                                        if target:
+                                            email_to_ban = target.email
+                                            db.add(BannedEmail(email=email_to_ban, created_at=time.time()))
+                                            await db.delete(target)
+                                            for sid, sess in list(session_manager.sessions.items()):
+                                                if sess.user_id == target_user_id:
+                                                    if sess.websocket:
+                                                        await sess.websocket.close(code=4001)
+                                                    session_manager.remove_session(sid)
+                                            await db.commit()
+                                            response_data = {"type": "success", "message": f"User {email_to_ban} banned"}
+                                        else:
+                                            response_data = {"type": "error", "message": "User not found"}
+
+                                    elif method == "admin.group_delete":
+                                        group_id = args.get("group_id")
+                                        print(f"ADMIN: Deleting group {group_id}")
+                                        res = await db.execute(select(Group).where(Group.id == group_id))
+                                        group = res.scalars().first()
+                                        if group:
+                                            await db.execute(delete(GroupMember).where(GroupMember.group_id == group_id))
+                                            res_ch = await db.execute(select(Channel).where(Channel.group_id == group_id))
+                                            channels = res_ch.scalars().all()
+                                            ch_ids = [c.id for c in channels]
+                                            if ch_ids:
+                                                await db.execute(delete(Message).where(Message.channel_id.in_(ch_ids)))
+                                                await db.execute(delete(Channel).where(Channel.id.in_(ch_ids)))
+                                            await db.delete(group)
+                                            await db.commit()
+                                            response_data = {"type": "success", "message": "Group deleted"}
+                                        else:
+                                            response_data = {"type": "error", "message": "Group not found"}
+
+                                    elif method == "admin.messages_get":
+                                        peer1_id = int(args.get("peer1_id"))
+                                        peer2_id = int(args.get("peer2_id"))
+                                        print(f"ADMIN: Fetching logs between {peer1_id} and {peer2_id}")
+                                        res = await db.execute(select(Message).where(
+                                            or_(
+                                                and_(Message.sender_id == peer1_id, Message.recipient_id == peer2_id),
+                                                and_(Message.sender_id == peer2_id, Message.recipient_id == peer1_id)
+                                            )
+                                        ).order_by(Message.id.desc()).limit(100))
+                                        msgs = res.scalars().all()
+                                        print(f"ADMIN: Found {len(msgs)} messages")
+                                        
+                                        msg_list = []
+                                        for m in msgs:
+                                            msg_list.append({
+                                                "id": m.id,
+                                                "sender_id": m.sender_id,
+                                                "content": m.content,
+                                                "created_at": m.created_at
+                                            })
+                                            
+                                        response_data = {"type": "admin.messages_list", "messages": msg_list}
+
+                                    elif method == "admin.banned_users_get":
+                                        print("ADMIN: Fetching banned emails...")
+                                        res = await db.execute(select(BannedEmail).order_by(BannedEmail.created_at.desc()))
+                                        banned_list = res.scalars().all()
+                                        response_data = {"type": "admin.banned_list", "emails": [{
+                                            "email": b.email,
+                                            "created_at": b.created_at 
+                                        } for b in banned_list]}
+
+                                    elif method == "admin.user_unban":
+                                        email_to_unban = args.get("email")
+                                        if not email_to_unban:
+                                            response_data = {"type": "error", "message": "Email required"}
+                                        else:
+                                            print(f"ADMIN: Unbanning {email_to_unban}")
+                                            res = await db.execute(select(BannedEmail).where(BannedEmail.email == email_to_unban))
+                                            entry = res.scalars().first()
+                                            if entry:
+                                                await db.delete(entry)
+                                                await db.commit()
+                                                response_data = {"type": "success", "message": f"Unbanned {email_to_unban}"}
+                                            else:
+                                                response_data = {"type": "error", "message": "Email not found in ban list"}
+
+                                except Exception as e:
+                                    print(f"ADMIN ERROR: {e}")
+                                    import traceback
+                                    traceback.print_exc()
+                                    response_data = {"type": "error", "message": f"Admin Action Failed: {str(e)}"}
                             
                             # Broadcast deletion if necessary (e.g. valid 'delete for all')
                             if delete_for_all:
@@ -1093,11 +1300,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif method == "messages.forward":
                     message_ids = args.get("message_ids", [])
                     target_peer_id = args.get("peer_id")
+                    channel_id = args.get("channel_id")
                     
                     if not session.user_id:
                         response_data = {"type": "error", "message": "Not authenticated"}
-                    elif not message_ids or not target_peer_id:
-                        response_data = {"type": "error", "message": "Missing message_ids or peer_id"}
+                    elif not message_ids or (not target_peer_id and not channel_id):
+                        response_data = {"type": "error", "message": "Missing message_ids or destination"}
                     else:
                         async with AsyncSessionLocal() as db:
                             # Fetch original messages
@@ -1106,14 +1314,18 @@ async def websocket_endpoint(websocket: WebSocket):
                             
                             forwarded_msgs = []
                             for orig in original_msgs:
+                                # Determine original sender (preserve if already forwarded)
+                                fwd_from_id = orig.fwd_from_id or orig.sender_id
+                                
                                 # Create forwarded message
                                 new_msg = Message(
                                     sender_id=session.user_id,
                                     recipient_id=target_peer_id,
+                                    channel_id=channel_id,
                                     content=orig.content,
                                     msg_type=orig.msg_type,
                                     media_url=orig.media_url,
-                                    fwd_from_id=orig.sender_id,  # Original sender
+                                    fwd_from_id=fwd_from_id,
                                     created_at=time.time()
                                 )
                                 db.add(new_msg)
@@ -1121,60 +1333,91 @@ async def websocket_endpoint(websocket: WebSocket):
                             
                             await db.commit()
                             
-                            # Update dialogs
-                            for new_msg in forwarded_msgs:
-                                await db.refresh(new_msg)
-                                
-                                # Sender dialog
-                                res = await db.execute(select(Dialog).where(and_(Dialog.user_id==session.user_id, Dialog.peer_id==target_peer_id)))
-                                d_sender = res.scalars().first()
-                                if not d_sender:
-                                    d_sender = Dialog(user_id=session.user_id, peer_id=target_peer_id, unread_count=0)
-                                    db.add(d_sender)
-                                d_sender.last_message_id = new_msg.id
-                                d_sender.updated_at = time.time()
-                                
-                                # Recipient dialog
-                                res = await db.execute(select(Dialog).where(and_(Dialog.user_id==target_peer_id, Dialog.peer_id==session.user_id)))
-                                d_recipient = res.scalars().first()
-                                if not d_recipient:
-                                    d_recipient = Dialog(user_id=target_peer_id, peer_id=session.user_id, unread_count=0)
-                                    db.add(d_recipient)
-                                d_recipient.last_message_id = new_msg.id
-                                d_recipient.updated_at = time.time()
-                                d_recipient.unread_count += 1
-                            
-                            await db.commit()
-                            
+                            # Handle dialogs for DMs
+                            if target_peer_id:
+                                for new_msg in forwarded_msgs:
+                                    await db.refresh(new_msg)
+                                    # Sender dialog
+                                    res = await db.execute(select(Dialog).where(and_(Dialog.user_id==session.user_id, Dialog.peer_id==target_peer_id)))
+                                    d_sender = res.scalars().first()
+                                    if not d_sender:
+                                        d_sender = Dialog(user_id=session.user_id, peer_id=target_peer_id, unread_count=0)
+                                        db.add(d_sender)
+                                    d_sender.last_message_id = new_msg.id
+                                    d_sender.updated_at = time.time()
+                                    
+                                    # Recipient dialog
+                                    res = await db.execute(select(Dialog).where(and_(Dialog.user_id==target_peer_id, Dialog.peer_id==session.user_id)))
+                                    d_recipient = res.scalars().first()
+                                    if not d_recipient:
+                                        d_recipient = Dialog(user_id=target_peer_id, peer_id=session.user_id, unread_count=0)
+                                        db.add(d_recipient)
+                                    d_recipient.last_message_id = new_msg.id
+                                    d_recipient.updated_at = time.time()
+                                    d_recipient.unread_count += 1
+                                await db.commit()
+
+                            # Prepare sender info (me)
+                            res = await db.execute(select(User).where(User.id == session.user_id))
+                            me = res.scalars().first()
+                            sender_info = serialize_user(me, include_status=False)
+
                             # Notify sender
                             response_data = {"type": "messages.forwarded", "count": len(forwarded_msgs)}
                             
-                            # Broadcast to recipient
+                            # Broadcast
                             for new_msg in forwarded_msgs:
+                                # Fetch fwd_from_user info
+                                fwd_user_info = None
+                                if new_msg.fwd_from_id:
+                                    f_res = await db.execute(select(User).where(User.id == new_msg.fwd_from_id))
+                                    f_user = f_res.scalars().first()
+                                    if f_user:
+                                        fwd_user_info = serialize_user(f_user, include_status=False)
+
                                 msg_obj = {
                                     "id": new_msg.id,
                                     "sender_id": session.user_id,
+                                    "sender": sender_info,
                                     "content": new_msg.content,
                                     "type": new_msg.msg_type,
                                     "media_url": new_msg.media_url,
                                     "is_read": False,
                                     "created_at": new_msg.created_at,
-                                    "fwd_from_id": new_msg.fwd_from_id
+                                    "fwd_from_id": new_msg.fwd_from_id,
+                                    "fwd_from_user": fwd_user_info
                                 }
-                                for sid, sess in session_manager.sessions.items():
-                                    if sess.user_id == target_peer_id and sess.websocket:
-                                        try:
-                                            push_wrapper = {
-                                                "type": "message.new",
-                                                "message": msg_obj,
-                                                "peer_id": session.user_id,
-                                                "sender_id": session.user_id
-                                            }
-                                            push_json = json.dumps(push_wrapper)
-                                            push_bytes = push_json.encode('utf-8')
-                                            push_enc = MTProtoCrypto.encrypt(sess.auth_key, push_bytes)
-                                            await sess.websocket.send_text(json.dumps({"data": push_enc.hex()}))
-                                        except: pass
+                                if channel_id: msg_obj["channel_id"] = channel_id
+
+                                if target_peer_id:
+                                    # Broadcast to recipient
+                                    push_wrapper = { "type": "message.new", "message": msg_obj, "peer_id": session.user_id, "sender_id": session.user_id }
+                                    push_json = json.dumps(push_wrapper)
+                                    push_bytes = push_json.encode('utf-8')
+                                    for sid, sess in session_manager.sessions.items():
+                                        if sess.user_id == target_peer_id and sess.websocket and sess.auth_key:
+                                            try:
+                                                push_enc = MTProtoCrypto.encrypt(sess.auth_key, push_bytes)
+                                                await sess.websocket.send_text(json.dumps({"data": push_enc.hex()}))
+                                            except: pass
+                                else:
+                                    # Channel Broadcasting
+                                    res = await db.execute(select(Channel).where(Channel.id == channel_id))
+                                    channel = res.scalars().first()
+                                    if channel:
+                                        res = await db.execute(select(GroupMember).where(GroupMember.group_id == channel.group_id))
+                                        members = res.scalars().all()
+                                        member_ids = [mb.user_id for mb in members]
+                                        
+                                        push_wrapper = { "type": "message.new", "message": msg_obj, "channel_id": channel_id, "sender_id": session.user_id }
+                                        push_json = json.dumps(push_wrapper)
+                                        push_bytes = push_json.encode('utf-8')
+                                        for sid, sess in session_manager.sessions.items():
+                                            if sess.user_id in member_ids and sess.user_id != session.user_id and sess.websocket and sess.auth_key:
+                                                try:
+                                                    push_enc = MTProtoCrypto.encrypt(sess.auth_key, push_bytes)
+                                                    await sess.websocket.send_text(json.dumps({ "data": push_enc.hex() }))
+                                                except: pass
 
                 # --- GROUP HANDLERS ---
                 elif method == "groups.create":
@@ -1236,13 +1479,36 @@ async def websocket_endpoint(websocket: WebSocket):
                                 c_res = await db.execute(select(Channel).where(Channel.group_id == g.id).order_by(Channel.position))
                                 channels = c_res.scalars().all()
                                 
+                                channels_info = []
+                                group_has_active_call = False
+                                group_active_participants = []
+                                
+                                for c in channels:
+                                    # active_group_calls is keyed by channel_id
+                                    call_info = active_group_calls.get(c.id)
+                                    has_call = call_info is not None
+                                    participants = list(call_info.values()) if has_call else []
+                                    
+                                    channels_info.append({
+                                        "id": c.id, 
+                                        "name": c.name, 
+                                        "type": c.type,
+                                        "has_active_call": has_call,
+                                        "active_participants": participants
+                                    })
+                                    
+                                    if has_call:
+                                        group_has_active_call = True
+                                        group_active_participants.extend(participants)
+                                
                                 groups_list.append({
                                     "id": g.id,
                                     "name": g.name,
                                     "avatar_url": g.avatar_url,
                                     "owner_id": g.owner_id,
-                                    "has_active_call": g.id in active_group_calls,
-                                    "channels": [{"id": c.id, "name": c.name, "type": c.type} for c in channels]
+                                    "has_active_call": group_has_active_call,
+                                    "active_participants": group_active_participants,
+                                    "channels": channels_info
                                 })
                             
                             response_data = {"type": "groups.list_result", "groups": groups_list}
@@ -1368,14 +1634,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 
                                 members_list = []
                                 for u, role in members:
-                                    members_list.append({
-                                        "id": u.id,
-                                        "display_name": u.display_name,
-                                        "username": u.username,
-                                        "avatar_url": u.avatar_url,
-                                        "role": role,
-                                        "is_online": session_manager.is_online(u.id)
-                                    })
+                                    u_data = serialize_user(u)
+                                    u_data["role"] = role
+                                    members_list.append(u_data)
                                 response_data = {"type": "groups.members.list_result", "group_id": group_id, "members": members_list}
 
                 elif method == "groups.channels.create":
@@ -1438,14 +1699,10 @@ async def websocket_endpoint(websocket: WebSocket):
                                     await db.execute(stmt)
                                     await db.commit()
                                     
-                                    response_data = {"type": "user.profile_updated", "user": {
-                                        "id": session.user_id,
-                                        "username": username or "unknown", # Should fetch actual if not passed, but we assume successful update
-                                        "display_name": display_name,
-                                        "avatar_url": avatar_url,
-                                        "about": about,
-                                        "phone_number": phone_number
-                                    }}
+                                    # Fetch updated user for consistent response
+                                    res = await db.execute(select(User).where(User.id == session.user_id))
+                                    updated_user = res.scalars().first()
+                                    response_data = {"type": "user.profile_updated", "user": serialize_user(updated_user, include_status=False)}
 
                 elif method in ["call.offer", "call.answer", "call.ice_candidate", "call.hangup", "call.reject"]:
                     if not session.user_id:
@@ -1490,121 +1747,143 @@ async def websocket_endpoint(websocket: WebSocket):
                                 response_data = {"type": "success"}
 
                 elif method == "groups.call.start":
-                    group_id = args.get("group_id")
+                    channel_id = args.get("group_id")  # This is actually a channel_id
                     if not session.user_id:
                         response_data = {"type": "error", "message": "Not authenticated"}
-                    elif not group_id:
-                        response_data = {"type": "error", "message": "Group ID required"}
+                    elif not channel_id:
+                        response_data = {"type": "error", "message": "Channel ID required"}
                     else:
-                        if group_id not in active_group_calls:
-                            active_group_calls[group_id] = {}
-                        
-                        # Notify all members of the group that a call started
+                        # Get the actual group_id from the channel
                         async with AsyncSessionLocal() as db:
-                            m_stmt = select(GroupMember.user_id).where(GroupMember.group_id == group_id)
-                            m_res = await db.execute(m_stmt)
-                            member_ids = m_res.scalars().all()
+                            ch_stmt = select(Channel).where(Channel.id == channel_id)
+                            ch_res = await db.execute(ch_stmt)
+                            channel = ch_res.scalar_one_or_none()
                             
-                            for mid in member_ids:
-                                await broadcast_event(mid, "groups.call.started", {"group_id": group_id, "started_by": session.user_id})
-                        
-                        response_data = {"type": "success"}
-
-                elif method == "groups.call.join":
-                    group_id = args.get("group_id")
-                    if not session.user_id:
-                        response_data = {"type": "error", "message": "Not authenticated"}
-                    elif not group_id:
-                        response_data = {"type": "error", "message": "Group ID required"}
-                    else:
-                        if group_id not in active_group_calls:
-                            active_group_calls[group_id] = {}
-                        
-                        # Get profile for others
-                        async with AsyncSessionLocal() as db:
-                            res = await db.execute(select(User).where(User.id == session.user_id))
-                            user = res.scalars().first()
-                            user_info = {
-                                "id": user.id,
-                                "display_name": user.display_name,
-                                "avatar_url": user.avatar_url
-                            }
-                            
-                            # Already in?
-                            if session.user_id in active_group_calls[group_id]:
-                                pass # Re-join or update
-                            
-                            # Participants BEFORE joining
-                            participants = list(active_group_calls[group_id].values())
-                            
-                            active_group_calls[group_id][session.user_id] = user_info
-                            
-                            # Notify existing participants
-                            for pid in active_group_calls[group_id]:
-                                if pid != session.user_id:
-                                    await broadcast_event(pid, "groups.call.member_joined", {"group_id": group_id, "user": user_info})
-                            
-                            response_data = {"type": "groups.call.join_result", "group_id": group_id, "participants": participants}
-
-                elif method == "groups.call.leave":
-                    group_id = args.get("group_id")
-                    print(f"DEBUG: User {session.user_id} leaving group call {group_id}")
-                    print(f"DEBUG: active_group_calls keys: {list(active_group_calls.keys())}")
-                    print(f"DEBUG: group_id in active_group_calls: {group_id in active_group_calls}")
-                    
-                    if group_id in active_group_calls:
-                        active_group_calls[group_id].pop(session.user_id, None)
-                        print(f"DEBUG: Removed user {session.user_id} from active_group_calls[{group_id}]")
-                        print(f"DEBUG: Remaining participants: {list(active_group_calls[group_id].keys())}")
-                        if not active_group_calls[group_id]:
-                            del active_group_calls[group_id]
-                            print(f"DEBUG: Group call {group_id} ended (no participants)")
-                        
-                        # Notify others - check if it's a channel or group
-                        async with AsyncSessionLocal() as db:
-                            # Check if group_id is a channel (starts with 'channel_')
-                            if isinstance(group_id, str) and group_id.startswith('channel_'):
-                                # Extract channel ID
-                                channel_id_str = group_id.replace('channel_', '')
-                                try:
-                                    channel_id = int(channel_id_str)
-                                    # Get all channel members (everyone in the server)
-                                    # For now, broadcast to all active sessions
-                                    print(f"DEBUG: Broadcasting to channel {channel_id} members")
-                                    # Get all users who are in this channel's server
-                                    # For simplicity, broadcast to all users in active_group_calls for this channel
-                                    # Or we can get all users from the server that this channel belongs to
-                                    
-                                    # Get channel to find its server
-                                    ch_res = await db.execute(select(Channel).where(Channel.id == channel_id))
-                                    channel = ch_res.scalars().first()
-                                    if channel:
-                                        # Get all members of the server
-                                        from app.db.models import ServerMember
-                                        sm_stmt = select(ServerMember.user_id).where(ServerMember.server_id == channel.server_id)
-                                        sm_res = await db.execute(sm_stmt)
-                                        member_ids = sm_res.scalars().all()
-                                        print(f"DEBUG: Broadcasting member_left to {len(member_ids)} server members")
-                                        for mid in member_ids:
-                                            print(f"DEBUG: Sending member_left event to user {mid}")
-                                            await broadcast_event(mid, "groups.call.member_left", {"group_id": group_id, "user_id": session.user_id})
-                                            if group_id not in active_group_calls:
-                                                await broadcast_event(mid, "groups.call.ended", {"group_id": group_id})
-                                except ValueError:
-                                    print(f"DEBUG: Invalid channel ID: {channel_id_str}")
+                            if not channel:
+                                response_data = {"type": "error", "message": "Channel not found"}
                             else:
-                                # It's a regular group
-                                m_stmt = select(GroupMember.user_id).where(GroupMember.group_id == group_id)
+                                actual_group_id = channel.group_id
+                                
+                                if channel_id not in active_group_calls:
+                                    active_group_calls[channel_id] = {}
+                                
+                                print(f"🎬 Starting call in channel {channel_id} (group {actual_group_id}) by user {session.user_id}")
+                                
+                                # Notify all members of the GROUP that a call started
+                                m_stmt = select(GroupMember.user_id).where(GroupMember.group_id == actual_group_id)
                                 m_res = await db.execute(m_stmt)
                                 member_ids = m_res.scalars().all()
-                                print(f"DEBUG: Broadcasting member_left to {len(member_ids)} group members")
+                                
+                                print(f"📢 Broadcasting groups.call.started to {len(member_ids)} members: {member_ids}")
                                 for mid in member_ids:
-                                    print(f"DEBUG: Sending member_left event to user {mid}")
-                                    await broadcast_event(mid, "groups.call.member_left", {"group_id": group_id, "user_id": session.user_id})
-                                    if group_id not in active_group_calls:
-                                        await broadcast_event(mid, "groups.call.ended", {"group_id": group_id})
+                                    print(f"  → Sending to user {mid}")
+                                    await broadcast_event(mid, "groups.call.started", {"group_id": channel_id, "started_by": session.user_id})
+                                
+                                response_data = {"type": "success"}
+
+                elif method == "groups.call.join":
+                    channel_id = args.get("group_id")  # This is actually a channel_id
+                    if not session.user_id:
+                        response_data = {"type": "error", "message": "Not authenticated"}
+                    elif not channel_id:
+                        response_data = {"type": "error", "message": "Channel ID required"}
                     else:
-                        print(f"DEBUG: group_id {group_id} not found in active_group_calls")
+                        if channel_id not in active_group_calls:
+                            active_group_calls[channel_id] = {}
+                        
+                        # Get profile for others and actual group_id
+                        async with AsyncSessionLocal() as db:
+                            # Get channel to find actual group_id
+                            ch_stmt = select(Channel).where(Channel.id == channel_id)
+                            ch_res = await db.execute(ch_stmt)
+                            channel = ch_res.scalar_one_or_none()
+                            
+                            if not channel:
+                                response_data = {"type": "error", "message": "Channel not found"}
+                            else:
+                                actual_group_id = channel.group_id
+                                
+                                res = await db.execute(select(User).where(User.id == session.user_id))
+                                user = res.scalars().first()
+                                user_info = serialize_user(user, include_status=False)
+                                
+                                # Already in?
+                                if session.user_id in active_group_calls[channel_id]:
+                                    pass # Re-join or update
+                                
+                                # Participants BEFORE joining
+                                participants = list(active_group_calls[channel_id].values())
+                                
+                                active_group_calls[channel_id][session.user_id] = user_info
+                                
+                                print(f"👤 User {session.user_id} joined call in channel {channel_id} (group {actual_group_id})")
+                                
+                                # Notify ALL group members (not just call participants)
+                                m_stmt = select(GroupMember.user_id).where(GroupMember.group_id == actual_group_id)
+                                m_res = await db.execute(m_stmt)
+                                member_ids = m_res.scalars().all()
+                                
+                                print(f"📢 Broadcasting groups.call.member_joined to {len(member_ids)} members: {member_ids}")
+                                for mid in member_ids:
+                                    if mid != session.user_id:
+                                        print(f"  → Sending to user {mid}: {user_info}")
+                                        await broadcast_event(mid, "groups.call.member_joined", {"group_id": channel_id, "user": user_info})
+                                
+                                response_data = {"type": "groups.call.join_result", "group_id": channel_id, "participants": participants}
+
+                elif method == "groups.call.leave":
+                    channel_id = args.get("group_id")  # This is actually a channel_id
+                    print(f"DEBUG: User {session.user_id} leaving call in channel {channel_id}")
+                    print(f"DEBUG: active_group_calls keys: {list(active_group_calls.keys())}")
+                    print(f"DEBUG: channel_id in active_group_calls: {channel_id in active_group_calls}")
+                    
+                    if channel_id in active_group_calls:
+                        # Get remaining participants BEFORE removing this user
+                        remaining_participant_ids = [pid for pid in active_group_calls[channel_id].keys() if pid != session.user_id]
+                        
+                        # Remove user from active call
+                        active_group_calls[channel_id].pop(session.user_id, None)
+                        print(f"DEBUG: Removed user {session.user_id} from active_group_calls[{channel_id}]")
+                        print(f"DEBUG: Remaining participants: {list(active_group_calls[channel_id].keys())}")
+                        
+                        # Notify ALL group members (not just call participants)
+                        async with AsyncSessionLocal() as db:
+                            # Get channel to find actual group_id
+                            ch_stmt = select(Channel).where(Channel.id == channel_id)
+                            ch_res = await db.execute(ch_stmt)
+                            channel = ch_res.scalar_one_or_none()
+                            
+                            if channel:
+                                actual_group_id = channel.group_id
+                                m_stmt = select(GroupMember.user_id).where(GroupMember.group_id == actual_group_id)
+                                m_res = await db.execute(m_stmt)
+                                member_ids = m_res.scalars().all()
+                                
+                                for mid in member_ids:
+                                    if mid != session.user_id:
+                                        await broadcast_event(mid, "groups.call.member_left", {"group_id": channel_id, "user_id": session.user_id})
+                        
+                        # If no one left, end the call
+                        if not active_group_calls[channel_id]:
+                            del active_group_calls[channel_id]
+                            print(f"DEBUG: Group call {channel_id} ended (no participants)")
+                            
+                            # Notify all members that call ended
+                            async with AsyncSessionLocal() as db:
+                                ch_stmt = select(Channel).where(Channel.id == channel_id)
+                                ch_res = await db.execute(ch_stmt)
+                                channel = ch_res.scalar_one_or_none()
+                                
+                                if channel:
+                                    actual_group_id = channel.group_id
+                                    m_stmt = select(GroupMember.user_id).where(GroupMember.group_id == actual_group_id)
+                                    m_res = await db.execute(m_stmt)
+                                    member_ids = m_res.scalars().all()
+                                    
+                                    for mid in member_ids:
+                                        await broadcast_event(mid, "groups.call.ended", {"group_id": channel_id})
+                    else:
+                        print(f"DEBUG: channel_id {channel_id} not found in active_group_calls")
                     
                     response_data = {"type": "success"}
 
@@ -1676,7 +1955,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 for mid in member_ids:
                                     if mid == session.user_id: continue # Already responding
                                     
-                                    for sid, sess in session_manager.sessions.items():
+                                    for sid, sess in list(session_manager.sessions.items()):
                                         if sess.user_id == mid and sess.websocket:
                                             try:
                                                 push = {"type": "groups.deleted", "group_id": group_id}
@@ -1749,18 +2028,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 else:
                     response_data = {"type": "error", "message": "Unknown method"}
 
-                response_plaintext = json.dumps(response_data)
-                
-                # Encrypt Response
-                response_bytes = response_plaintext.encode('utf-8')
-                encrypted_response = MTProtoCrypto.encrypt(session.auth_key, response_bytes)
-                
-                await websocket.send_text(json.dumps({
-                    "data": encrypted_response.hex()
-                }))
+                try:
+                    response_plaintext = json.dumps(response_data)
+                    
+                    # Encrypt Response
+                    response_bytes = response_plaintext.encode('utf-8')
+                    encrypted_response = MTProtoCrypto.encrypt(session.auth_key, response_bytes)
+                    
+                    await websocket.send_text(json.dumps({
+                        "data": encrypted_response.hex()
+                    }))
+                except Exception as send_err:
+                     print(f"WS SEND ERROR while sending response for {method}: {send_err}")
                 
             except Exception as e:
-                print(f"Decryption Error: {e}")
+                print(f"WS Handling Error (Decryption/Logic): {e}")
+                import traceback
+                traceback.print_exc()
                 pass
                 
     except WebSocketDisconnect:

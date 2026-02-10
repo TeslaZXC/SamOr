@@ -22,6 +22,9 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
+    print("\n" + "="*50)
+    print("SERVER STARTING... (If you see this often, it's restarting!)")
+    print("="*50 + "\n")
     await init_db()
 
 # Include Routers
@@ -46,4 +49,12 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    print("🚀 Starting Server with optimized reload config (ignoring data folder)")
+    # Using 'app' dir only helps, but explicit exclude is safer
+    import os
+    # Ensure data dir exists
+    if not os.path.exists("data"):
+        os.makedirs("data")
+    
+    # Reload=False ensures absolute stability. Manual restart required for code changes.
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

@@ -186,7 +186,10 @@ const Settings = ({ user, onClose }) => {
                                         <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Display Name</label>
                                         <input
                                             value={displayName}
-                                            onChange={e => setDisplayName(e.target.value)}
+                                            onChange={e => {
+                                                const val = e.target.value.replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s]/g, '').slice(0, 16);
+                                                setDisplayName(val);
+                                            }}
                                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500/50 transition-colors"
                                             placeholder="Your Name"
                                         />
@@ -197,7 +200,10 @@ const Settings = ({ user, onClose }) => {
                                             <span className="absolute left-4 top-3.5 text-white/40">@</span>
                                             <input
                                                 value={username}
-                                                onChange={e => setUsername(e.target.value)}
+                                                onChange={e => {
+                                                    const val = e.target.value.replace(/[^a-zA-Zа-яА-ЯёЁ0-9_]/g, '').slice(0, 16);
+                                                    setUsername(val);
+                                                }}
                                                 className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-4 py-3 text-white outline-none focus:border-blue-500/50 transition-colors"
                                                 placeholder="username"
                                             />

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Phone, Video, Mic, MicOff, VideoOff, PhoneOff, PictureInPicture, Minimize2, Maximize2 } from 'lucide-react';
 
 const CallModal = ({
@@ -13,9 +14,71 @@ const CallModal = ({
 }) => {
     const localVideoRef = useRef(null);
     const remoteVideoRef = useRef(null);
+    const containerRef = useRef(null);
+
     const [isMicOn, setIsMicOn] = useState(true);
     const [isCamOn, setIsCamOn] = useState(true);
     const [isMinimized, setIsMinimized] = useState(false);
+    const [dragPos, setDragPos] = useState(null); // {x, y}
+    const dragRef = useRef(null); // {offsetX, offsetY, width, height}
+
+    const handleMouseDown = (e) => {
+        if (e.target.closest('button')) return;
+
+        const rect = e.currentTarget.getBoundingClientRect();
+
+        dragRef.current = {
+            offsetX: e.clientX - rect.left,
+            offsetY: e.clientY - rect.top,
+            width: rect.width,
+            height: rect.height
+        };
+
+        if (containerRef.current) {
+            containerRef.current.style.cursor = 'grabbing';
+            containerRef.current.style.transition = 'none';
+        }
+
+        e.preventDefault();
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e) => {
+            if (!dragRef.current || !containerRef.current) return;
+
+            let x = e.clientX - dragRef.current.offsetX;
+            let y = e.clientY - dragRef.current.offsetY;
+
+            // Clamping to screen boundaries
+            const maxX = window.innerWidth - dragRef.current.width;
+            const maxY = window.innerHeight - dragRef.current.height;
+
+            x = Math.max(0, Math.min(x, maxX));
+            y = Math.max(0, Math.min(y, maxY));
+
+            // Direct DOM update for high performance
+            containerRef.current.style.left = `${x}px`;
+            containerRef.current.style.top = `${y}px`;
+            containerRef.current.style.bottom = 'auto';
+            containerRef.current.style.right = 'auto';
+
+            setDragPos({ x, y });
+        };
+        const handleMouseUp = () => {
+            if (dragRef.current && containerRef.current) {
+                containerRef.current.style.cursor = 'grab';
+            }
+            dragRef.current = null;
+        };
+        if (isMinimized) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        }
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isMinimized]);
 
     useEffect(() => {
         if (localStream && localVideoRef.current) {
@@ -64,77 +127,76 @@ const CallModal = ({
         setIsMinimized(!isMinimized);
     };
 
-
-
     if (!callStatus || callStatus === 'idle') return null;
 
-    if (isMinimized) {
-        return (
-            <div
-                className="fixed z-[60] w-72 h-48 bg-[#1c1c1e] rounded-xl overflow-hidden shadow-2xl border border-white/20 group bottom-4 right-4 animate-in slide-in-from-bottom-4 duration-300"
-            >
-                {/* Minimized Content */}
-                <div className="relative w-full h-full">
-                    {callStatus === 'connected' && remoteStream ? (
+    const modalContent = isMinimized ? (
+        <div
+            ref={containerRef}
+            onMouseDown={handleMouseDown}
+            style={dragPos ? {
+                top: dragPos.y,
+                left: dragPos.x,
+                bottom: 'auto',
+                right: 'auto',
+                cursor: 'grab',
+                transition: 'none'
+            } : { cursor: 'grab' }}
+            className={`fixed z-[9999] w-72 h-48 bg-[#1c1c1e] rounded-xl overflow-hidden shadow-2xl border border-white/20 group select-none ${!dragPos ? 'bottom-4 right-4 animate-in slide-in-from-bottom-4 duration-300' : ''}`}
+        >
+            <div className="relative w-full h-full pointer-events-none">
+                {callStatus === 'connected' && remoteStream ? (
+                    <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        playsInline
+                        className="w-full h-full object-cover"
+                    />
+                ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-black text-white p-4 text-center">
+                        {peer?.avatar_url ? (
+                            <img src={peer.avatar_url} className="w-12 h-12 rounded-full mb-2 object-cover border-2 border-white/10" />
+                        ) : (
+                            <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center font-bold text-lg mb-2">
+                                {peer?.display_name?.[0]}
+                            </div>
+                        )}
+                        <p className="font-bold text-sm truncate w-full">{peer?.display_name}</p>
+                        <p className="text-xs text-white/50">{callStatus === 'connected' ? 'Connected' : 'Calling...'}</p>
+                    </div>
+                )}
+
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-sm pointer-events-auto">
+                    <button
+                        onClick={toggleMinimize}
+                        className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+                        title="Maximize"
+                    >
+                        <Maximize2 size={20} />
+                    </button>
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onHangup(); }}
+                        className="p-3 bg-red-500 hover:bg-red-600 rounded-full text-white transition-colors"
+                        title="End Call"
+                    >
+                        <PhoneOff size={20} />
+                    </button>
+                </div>
+
+                {localStream && isVideoCall && (
+                    <div className="absolute top-2 right-2 w-20 h-14 bg-black/50 rounded-lg overflow-hidden border border-white/10 shadow-md">
                         <video
-                            ref={remoteVideoRef}
+                            ref={localVideoRef}
                             autoPlay
                             playsInline
-                            className="w-full h-full object-cover"
+                            muted
+                            className="w-full h-full object-cover mirror"
                         />
-                    ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-gray-900 to-black text-white p-4 text-center">
-                            {peer?.avatar_url ? (
-                                <img src={peer.avatar_url} className="w-12 h-12 rounded-full mb-2 object-cover border-2 border-white/10" />
-                            ) : (
-                                <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center font-bold text-lg mb-2">
-                                    {peer?.display_name?.[0]}
-                                </div>
-                            )}
-                            <p className="font-bold text-sm truncate w-full">{peer?.display_name}</p>
-                            <p className="text-xs text-white/50">{callStatus === 'connected' ? 'Connected' : 'Calling...'}</p>
-                        </div>
-                    )}
-
-                    {/* Overlay on Hover */}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 backdrop-blur-sm">
-                        <button
-                            onClick={toggleMinimize}
-                            className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-                            title="Maximize"
-                        >
-                            <Maximize2 size={20} />
-                        </button>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onHangup(); }}
-                            className="p-3 bg-red-500 hover:bg-red-600 rounded-full text-white transition-colors"
-                            title="End Call"
-                        >
-                            <PhoneOff size={20} />
-                        </button>
                     </div>
-
-                    {/* Self View Mini */}
-                    {localStream && isVideoCall && (
-                        <div className="absolute top-2 right-2 w-20 h-14 bg-black/50 rounded-lg overflow-hidden border border-white/10 shadow-md">
-                            <video
-                                ref={localVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className="w-full h-full object-cover mirror"
-                            />
-                        </div>
-                    )}
-                </div>
+                )}
             </div>
-        );
-    }
-
-    return (
-        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in duration-300">
-
-            {/* Top Bar for Minimize */}
+        </div>
+    ) : (
+        <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in duration-300">
             <div className="absolute top-6 right-6 z-50 flex gap-4">
                 {callStatus === 'connected' && (
                     <button
@@ -147,7 +209,6 @@ const CallModal = ({
                 )}
             </div>
 
-            {/* Main Video Area */}
             <div className="relative w-full max-w-4xl h-[70vh] bg-[#1c1c1e] rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex items-center justify-center">
                 {callStatus === 'connected' && remoteStream ? (
                     <video
@@ -178,7 +239,6 @@ const CallModal = ({
                     </div>
                 )}
 
-                {/* Local Video (PIP) */}
                 {localStream && isVideoCall && (
                     <div className="absolute top-6 right-6 w-48 h-36 bg-black/50 rounded-xl overflow-hidden border border-white/20 shadow-lg" onClick={e => e.stopPropagation()}>
                         <video
@@ -192,7 +252,6 @@ const CallModal = ({
                 )}
             </div>
 
-            {/* Controls */}
             <div className="mt-8 flex items-center gap-6">
                 {callStatus === 'incoming' ? (
                     <>
@@ -227,7 +286,6 @@ const CallModal = ({
                             </button>
                         )}
 
-                        {/* PiP Button */}
                         {isVideoCall && (callStatus === 'connected') && (
                             <button
                                 onClick={togglePiP}
@@ -255,6 +313,8 @@ const CallModal = ({
             `}</style>
         </div>
     );
+
+    return createPortal(modalContent, document.body);
 };
 
 export default CallModal;

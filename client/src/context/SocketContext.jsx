@@ -41,67 +41,101 @@ export const SocketProvider = ({ children }) => {
         };
 
         ws.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
+            try {
+                const data = JSON.parse(event.data);
 
-            if (data.type === 'server_hello') {
-                // 2. Receive Server Hello
-                const serverPubKey = data.payload.public_key;
-                sessionIdRef.current = data.payload.session_id;
+                if (data.type === 'server_hello') {
+                    // 2. Receive Server Hello
+                    const serverPubKey = data.payload.public_key;
+                    sessionIdRef.current = data.payload.session_id;
 
-                // Compute Auth Key
-                const authKey = dhRef.current.computeSharedSecret(serverPubKey);
-                authKeyRef.current = authKey;
+                    // Compute Auth Key
+                    const authKey = dhRef.current.computeSharedSecret(serverPubKey);
+                    authKeyRef.current = authKey;
 
-                console.log('Handshake Complete. AuthKey derived.');
-                setStatus('connected');
+                    console.log('Handshake Complete. AuthKey derived.');
+                    setStatus('connected');
 
-            } else if (data.data) {
-                // Encrypted Message
-                if (!authKeyRef.current) return;
+                } else if (data.data) {
+                    // Encrypted Message
+                    if (!authKeyRef.current) return;
 
-                try {
-                    const encryptedBytes = new Uint8Array(data.data.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-                    const decrypted = MTProtoCrypto.decrypt(authKeyRef.current, encryptedBytes);
+                    try {
+                        const encryptedBytes = new Uint8Array(data.data.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                        const decrypted = MTProtoCrypto.decrypt(authKeyRef.current, encryptedBytes);
 
-                    // Decode UTF8
-                    const decoder = new TextDecoder();
-                    const jsonStr = decoder.decode(decrypted);
-                    const message = JSON.parse(jsonStr);
+                        // Decode UTF8
+                        const decoder = new TextDecoder();
+                        const jsonStr = decoder.decode(decrypted);
+                        const message = JSON.parse(jsonStr);
 
-                    console.log('Decrypted Message:', message);
+                        console.log('Decrypted Message:', message);
 
-                    // Handle dialogs.list and user.list_result in context
-                    if (message.type === 'dialogs.list') {
-                        // Filter out dialogs with invalid peer data
-                        const validDialogs = (message.dialogs || []).filter(d => {
-                            if (!d.peer || !d.peer.display_name) {
-                                console.warn('DEBUG: Filtering out invalid dialog', d);
-                                return false;
-                            }
-                            return true;
-                        });
-                        setDialogs(validDialogs);
-                    } else if (message.type === 'user.list_result') {
-                        // Filter out users without display_name
-                        const validUsers = (message.users || []).filter(u => {
-                            if (!u.display_name) {
-                                console.warn('DEBUG: Filtering out invalid user', u);
-                                return false;
-                            }
-                            return true;
-                        });
-                        setContacts(validUsers);
+                        // Handle dialogs.list and user.list_result in context
+                        if (message.type === 'dialogs.list') {
+                            // Filter out dialogs with invalid peer data
+                            const validDialogs = (message.dialogs || []).filter(d => {
+                                if (!d.peer || !d.peer.display_name) {
+                                    console.warn('DEBUG: Filtering out invalid dialog', d);
+                                    return false;
+                                }
+                                return true;
+                            });
+                            setDialogs(validDialogs);
+                        } else if (message.type === 'user.list_result') {
+                            // Filter out users without display_name
+                            const validUsers = (message.users || []).filter(u => {
+                                if (!u.display_name) {
+                                    console.warn('DEBUG: Filtering out invalid user', u);
+                                    return false;
+                                }
+                                return true;
+                            });
+                            setContacts(validUsers);
+                        }
+
+                        if (message.type === 'auth_success') {
+                            // We let the component handle the state update via messages or callback
+                            // We push it to messages so App/Login can see it
+                        } else if (message.type === 'user.status') {
+                            // Update dialogs with new status
+                            setDialogs(prevDialogs => prevDialogs.map(d => {
+                                if (d.peer && (d.peer.id == message.user_id)) {
+                                    return {
+                                        ...d,
+                                        peer: {
+                                            ...d.peer,
+                                            is_online: message.status === 'online',
+                                            last_seen: message.last_seen !== undefined ? message.last_seen : d.peer.last_seen,
+                                            // Only update full object if it contains display_name (prevent "Unknown")
+                                            ...((message.user && message.user.display_name) ? message.user : {})
+                                        }
+                                    };
+                                }
+                                return d;
+                            }));
+
+                            // Update contacts with new status
+                            setContacts(prevContacts => prevContacts.map(c => {
+                                if (c.id == message.user_id) {
+                                    return {
+                                        ...c,
+                                        is_online: message.status === 'online',
+                                        last_seen: message.last_seen !== undefined ? message.last_seen : c.last_seen,
+                                        ...((message.user && message.user.display_name) ? message.user : {})
+                                    };
+                                }
+                                return c;
+                            }));
+                        }
+
+                        setMessages(prev => [...prev, message]);
+                    } catch (err) {
+                        console.error('Decryption/Processing failed', err);
                     }
-
-                    if (message.type === 'auth_success') {
-                        // We let the component handle the state update via messages or callback
-                        // We push it to messages so App/Login can see it
-                    }
-
-                    setMessages(prev => [...prev, message]);
-                } catch (err) {
-                    console.error('Decryption failed', err);
                 }
+            } catch (err) {
+                console.error('WebSocket Message Error:', err);
             }
         };
 

@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    hmr: false, // Disable Hot Module Replacement to prevent auto-reloads
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
@@ -17,6 +18,9 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       }
+    },
+    watch: {
+      ignored: ['../server/**', '**/node_modules/**', '**/.git/**']
     }
   }
 })

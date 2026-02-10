@@ -1,0 +1,168 @@
+  const uploadFile = async (file) => {
+    return new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_URL}/upload`);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress({ progress: percent, fileName: file.name });
+        }
+      };
+
+      xhr.onload = () => {
+        setUploadProgress(null);
+        if (xhr.status === 200) {
+          const data = JSON.parse(xhr.responseText);
+          resolve(data.url);
+        } else {
+          console.error("Upload failed", xhr.responseText);
+          alert("Upload failed");
+          resolve(null);
+        }
+      };
+
+      xhr.onerror = () => {
+        setUploadProgress(null);
+        console.error("Upload error");
+        alert("Network Error");
+        resolve(null);
+      };
+
+      xhr.send(formData);
+    });
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    const newFiles = files.map(file => {
+      let type = 'file';
+      if (file.type.startsWith('image/')) type = 'photo';
+      else if (file.type.startsWith('video/')) type = 'video';
+      
+      return {
+        file,
+        type,
+        name: file.name,
+        id: Math.random().toString(36).substr(2, 9)
+      };
+    });
+
+    setPendingFiles(prev => [...prev, ...newFiles]);
+    e.target.value = '';
+  };
+
+  const handlePaste = async (e) => {
+    if (!e.clipboardData || !e.clipboardData.items) return;
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          e.preventDefault();
+          setPendingFiles(prev => [...prev, {
+            file: blob,
+            type: 'photo',
+            name: `pasted_image_${Date.now()}.png`,
+            id: Math.random().toString(36).substr(2, 9)
+          }]);
+        }
+      }
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Microphone access requires HTTPS or localhost.");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+        audioChunksRef.current = [];
+        recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+        recorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const audioFile = new File([audioBlob], "voice_message.webm", { type: "audio/webm" });
+          const url = await uploadFile(audioFile);
+          if (url) {
+            const args = { type: 'voice', text: 'Голосовое сообщение', content: url };
+            if (activeChat.type === 'channel') args.channel_id = activeChat.channel_id;
+            else args.peer_id = activeChat.peer.id;
+            sendMessage({ method: 'message.send', args });
+          }
+          stream.getTracks().forEach(track => track.stop());
+        };
+        recorder.start();
+        setIsRecording(true);
+      } catch (err) {
+        alert("Microphone access denied");
+      }
+    }
+  };
+
+  const handleReply = (msg) => {
+    setReplyingTo(msg);
+  };
+
+  const handleDelete = (msgId, forAll) => {
+    sendMessage({
+      method: 'messages.delete',
+      args: { message_ids: [msgId], delete_for_all: forAll }
+    });
+    setContextMenu(null);
+  };
+
+  const handleSend = async () => {
+    if ((!input.trim() && pendingFiles.length === 0) || !activeChat) return;
+    const currentPendingFiles = [...pendingFiles];
+    const currentInput = input.trim();
+    setPendingFiles([]);
+    setInput('');
+    setReplyingTo(null);
+    const sendTextMessage = (text) => {
+      const args = { type: 'text', text };
+      if (activeChat.type === 'channel') args.channel_id = activeChat.channel_id;
+      else args.peer_id = activeChat.peer.id;
+      if (replyingTo) args.reply_to_msg_id = replyingTo.id;
+      sendMessage({ method: 'message.send', args });
+    };
+    if (currentPendingFiles.length > 0) {
+      for (const pFile of currentPendingFiles) {
+        const url = await uploadFile(pFile.file);
+        if (url) {
+          const messageArgs = {
+            type: pFile.type,
+            text: pFile.type === 'photo' ? 'Фото' : (pFile.type === 'video' ? 'Видео' : pFile.name),
+            content: url
+          };
+          if (activeChat.type === 'channel') messageArgs.channel_id = activeChat.channel_id;
+          else messageArgs.peer_id = activeChat.peer.id;
+          if (replyingTo) messageArgs.reply_to_msg_id = replyingTo.id;
+          sendMessage({ method: 'message.send', args: messageArgs });
+        }
+      }
+    }
+    if (currentInput) sendTextMessage(currentInput);
+  };
+
+  if (!activeChat) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-black/10 backdrop-blur-sm">
+        <div className="bg-white/5 p-4 rounded-full mb-4">
+          <Lock size={32} className="text-white/20" />
+        </div>
+        <h3 className="text-lg font-medium text-white/60">Выберите чат, чтобы начать общение</h3>
+      </div>
+    );
+  }
